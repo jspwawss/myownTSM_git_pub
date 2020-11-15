@@ -37,7 +37,7 @@ class YouCookDataSetRcg(data.Dataset):
     def __init__(self, root_path,list_file,
                 num_segments=8, new_length=1, modality="RGB",
                 train=False,test=False,val=False,
-                vtmpl = r"{}.mp4", ttmpl=r"{}.txt", ftmpl=r"image_{},jpg",
+                vtmpl = r"{}.mp4", ttmpl=r"{}.txt", ftmpl=r"image_{}.jpg",
                 slice=False, recognition=False,
                 transforms=torchvision.transforms.Compose([
                     torchvision.transforms.CenterCrop((256,256)),
@@ -133,7 +133,7 @@ class YouCookDataSetRcg(data.Dataset):
                 segment=annotation["segment"]
                 totalFrames += segment[1]-segment[0]+1
                 #print("totalFrames=",totalFrames)
-                #video = _getVideo(species=species, title=title, startidx=segment[0],endidx=segment[1])
+                video = self._getVideo(species=species, title=title, startidx=segment[0],endidx=segment[1])
                 id = annotation["id"]
                 sentence = annotation["sentence"]
                 #print("id ={},sentence={}".format(id,sentence))
@@ -185,7 +185,7 @@ class YouCookDataSetRcg(data.Dataset):
                     #exit()
                     print("success get vidoe clip")
                     videos.append(video)
-
+                    #print(videos)
                     ######do not comment it
                     print(len(videos)) ###use for check video return, if video return -1 will jump to exception
                     #### do not delete it
@@ -221,8 +221,20 @@ class YouCookDataSetRcg(data.Dataset):
         pass
     def _getVideo(self,species:str=None,title:str=None,startidx:int=None, endidx:int=None):    #get video clip in caption time
                             #return [video clip]
+        species = species.replace(" ","_")
+        tmpstr = str()
+        
+        for t in title:
+            try:
+                if t.encode(encoding="utf-8").decode("ascii"):
+                    tmpstr +=t
+
+            except:
+                pass
+        
         title = ''.join(f for f in title if f.isalnum() or f == ' ').strip()
-        filename = os.path.join(self.root_path,"images",species,title,self.ftmpl.format(startidx))
+        title = tmpstr.strip().replace(" ","_")
+        filename = os.path.join(self.root_path,"image",species,title,self.ftmpl.format(startidx))
         #filename = r"/home/share/YouCook/downloadVideo/bibimbap/Bibimbap.mp4"      #resolution < input size
         #startidx = 1000
         #endidx = 1000
@@ -230,14 +242,15 @@ class YouCookDataSetRcg(data.Dataset):
 
         #[ptslog, fps] = self._getVideoTimeStamps(filename=filename)
 
-
+        
         #videoStream = torchvision.io.read_video(filename,ptslog[startidx],ptslog[endidx])
         videoStream = Image.open(filename)
         onlyVideo = videoStream
-
+        
         #onlyVideo = onlyVideo.transpose(1,3)
-
-        oriH, oriW = onlyVideo.size()[-2], onlyVideo.size()[-1]
+        onlyVideo = np.swapaxes(onlyVideo, 0,2)
+        oriH, oriW = np.shape(onlyVideo)[-2], np.shape(onlyVideo)[-1]
+        #oriH, oriW = onlyVideo.size()[-2], onlyVideo.size()[-1]
         if min(oriH,oriW) >= self.inputsize:
             #print("ayayay")
             onlyVideo = onlyVideo[...,(oriH//2) -(min(oriH,oriW)//2) : (oriH//2)+(min(oriH,oriW)//2), oriW//2-min(oriH,oriW)//2:oriW//2+min(oriH,oriW)//2]
