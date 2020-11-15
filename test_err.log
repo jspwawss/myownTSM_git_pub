@@ -1,0 +1,60 @@
+/home/ubuntu/.local/lib/python3.5/site-packages/torch/nn/functional.py:2479: UserWarning: Default upsampling behavior when mode=bilinear is changed to align_corners=False since 0.4.0. Please specify align_corners=True if the old behavior is desired. See the documentation of nn.Upsample for details.
+  "See the documentation of nn.Upsample for details.".format(mode))
+Traceback (most recent call last):
+  File "test_models.py", line 443, in <module>
+    for i, data_label_pairs in enumerate(zip(*data_iter_list)):
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/dataloader.py", line 801, in __next__
+    return self._process_data(data)
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/dataloader.py", line 846, in _process_data
+    data.reraise()
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/_utils.py", line 369, in reraise
+    raise self.exc_type(msg)
+FileNotFoundError: Caught FileNotFoundError in DataLoader worker process 2.
+Original Traceback (most recent call last):
+  File "/home/ubuntu/backup_kevin/myownTSM/ops/dataset.py", line 235, in _load_image
+    return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx))).convert('RGB')]
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/PIL/Image.py", line 2766, in open
+    fp = builtins.open(filename, "rb")
+FileNotFoundError: [Errno 2] No such file or directory: '/home/share/UCF101/UCF101-frames/v_Typing_g20_c06/img_00200.jpg'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/_utils/worker.py", line 178, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/_utils/fetch.py", line 44, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/_utils/fetch.py", line 44, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/ubuntu/backup_kevin/myownTSM/ops/dataset.py", line 434, in __getitem__
+    return self.get(record, segment_indices)
+  File "/home/ubuntu/backup_kevin/myownTSM/ops/dataset.py", line 447, in get
+    seg_imgs = self._load_image(record.path, p)
+  File "/home/ubuntu/backup_kevin/myownTSM/ops/dataset.py", line 241, in _load_image
+    return [Image.open(os.path.join(self.root_path, directory, self.image_tmpl.format(idx+1))).convert('RGB')]
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/PIL/Image.py", line 2766, in open
+    fp = builtins.open(filename, "rb")
+FileNotFoundError: [Errno 2] No such file or directory: '/home/share/UCF101/UCF101-frames/v_Typing_g20_c06/img_00201.jpg'
+
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/usr/lib/python3.5/threading.py", line 914, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.5/threading.py", line 862, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/utils/data/_utils/pin_memory.py", line 21, in _pin_memory_loop
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/usr/lib/python3.5/multiprocessing/queues.py", line 113, in get
+    return ForkingPickler.loads(res)
+  File "/home/ubuntu/.local/lib/python3.5/site-packages/torch/multiprocessing/reductions.py", line 284, in rebuild_storage_fd
+    fd = df.detach()
+  File "/usr/lib/python3.5/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/usr/lib/python3.5/multiprocessing/resource_sharer.py", line 87, in get_connection
+    c = Client(address, authkey=process.current_process().authkey)
+  File "/usr/lib/python3.5/multiprocessing/connection.py", line 487, in Client
+    c = SocketClient(address)
+  File "/usr/lib/python3.5/multiprocessing/connection.py", line 614, in SocketClient
+    s.connect(address)
+ConnectionRefusedError: [Errno 111] Connection refused
+

@@ -7,6 +7,7 @@ python3 main_yc.py youcook RGB \
 	--tune_from=pretrained/TSM_kinetics_RGB_resnet50_shift8_blockres_avg_segment8_e50.pth \
 	--suffix=MSTSM_image
 	2>err.log
+
 #MSTSM+TFDEM+prune
 # python3 main.py ucf101 RGB \
 # 	--arch resnet50 --num_segments 8 \
