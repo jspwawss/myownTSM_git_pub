@@ -4,7 +4,7 @@
 # {jilin, songhan}@mit.edu, ganchuang@csail.mit.edu
 
 import os
-ROOT_DATASET = '/home/share/'
+ROOT_DATASET = '/home/chcheng08/NTHU/lju'
 
 def return_MSASL(modality):
     filename_categories = 100
@@ -165,7 +165,7 @@ def return_youcook(modality):
         root_data = os.path.join(ROOT_DATASET,"YouCook")
         filename_imglist_train = os.path.join(ROOT_DATASET,"split","train_list.txt")
         filename_imglist_val = os.path.join(ROOT_DATASET,"split","val_list.txt")
-        prefix=".mp4"
+        prefix="image_{}.jpg"
     else:
         raise NotImplementedError("no such modality:"+modality)
     return filename_categories, filename_imglist_train, filename_imglist_val, root_data, prefix
