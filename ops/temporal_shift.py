@@ -30,27 +30,45 @@ class TemporalShift(nn.Module):
 		if concat:
 			print('=> Concatenate after shifting...')
 			new_input_channel = self.net.in_channels + self.net.in_channels // n_div // 2 * 2
+			print("new_input_channel=",new_input_channel)
 			self.net = self.fill_param_to_extra_channels(self.net, new_input_channel)
 		
 		print('=> Using fold div: {}'.format(self.fold_div))
 
 	def forward(self, x):
 		
-		x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace)
-		
+		#x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace)
+		print("in temporal_shift forward")
+		print("x size=",x.size())
+		self.n_segment = x.size()[0]
+		#self.fold_div = x.size()[0]
+		#print(self.inplace)		#False
+		#exit()
+		x = self.shift(x, self.n_segment,fold_div= self.fold_div, inplace =self.inplace)
 		if self.Prune:
+			print("prune")
 			x = self.prune(x, prune_list = self.prune_list)
-		if self.Concat:
-			x = self.concat(x, self.n_segment, fold_div=self.fold_div)
 		
+		if self.Concat:
+			print("concat")
+			x = self.concat(x, self.n_segment, fold_div=self.fold_div)
+		print("after concate x size",x.size())
+		print("going to resnet50-")
+		print(self.net)
 		return self.net(x)
 
 	@staticmethod
 	def shift(x, n_segment, fold_div=8, inplace=False, concat = False):
-
+		
 		nt, c, h, w = x.size()
 		n_batch = nt // n_segment
+		#n_batch = 1
+		print("n_batch=",n_batch)
+		print("x.size()=",x.size())
+		print("n_segment",n_segment)
+		print("fold_div",fold_div)
 		x = x.view(n_batch, n_segment, c, h, w)
+		#x = x.view(1,-1,c,h,w)
 		
 
 		fold = c // fold_div
@@ -60,10 +78,18 @@ class TemporalShift(nn.Module):
 			return out.view(nt, c, h, w)
 		else:
 			out = torch.zeros_like(x)
+			print("fold,",fold)
+			print(out[0,0,0,0,0])
+			print("out size",out.size())
 			out[:, :-1, :fold] = x[:, 1:, :fold]  # shift left(up)
+			print(out[0,0,0,0,0])
+			print(out.size())
 			out[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right(down)
+			print(out[0,0,0,0,0])
+			print(out.size())
 			out[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-
+			print(out[0,0,0,0,0])
+			print(out.size())
 			return out.view(nt, c, h, w)
 
 	def prune(self, x, prune_list = []):
@@ -81,24 +107,34 @@ class TemporalShift(nn.Module):
 			return x_prune
 
 	def concat(self, x, n_segment, fold_div=8):
+		print("x,size(),",x.size())
 		nt, c, h, w = x.size()
 		n_batch = nt // n_segment
 		x = x.view(n_batch, n_segment, c, h, w)
+		#x = x.view(1,-1,c,h,w)
 
 		fold = c // fold_div
 		fold2 = fold // 2
-
+		print("in concat")
+		print("fold={},fold2={}".format(fold,fold2))
 		out = torch.zeros(n_batch, n_segment, c+2*fold2, h, w, dtype=x.dtype, layout=x.layout, device=x.device)
+		print(out[0,0,0,0,0])
 		out[:, :-2, c:c+fold2] = x[:, 2:, c - 2 * fold2:c - fold2]		# shift left(up)
+		print(out[0,0,0,0,0])
 		out[:, 2:, c+fold2:c+2*fold2] = x[:, :-2, c - fold2:]			# shift right(down) 
+		print(out[0,0,0,0,0])
 		out[:, :, :c] = x[:, :, :]  									# not shift
+		print(out[0,0,0,0,0])
 
 		return out.view(nt, c+2*fold2, h, w)
 
 	def fill_param_to_extra_channels(self, net, new_input_channel):
+		print("in tmp_shift.py ::fill_param_to_extra_channels")
 		params = [x.clone() for x in net.parameters()]
 		kernel_size = params[0].size()
+		print("kernel_size",kernel_size)
 		new_kernel_size = kernel_size[:1] + (int(new_input_channel), ) + kernel_size[2:]
+		print("new_kernel_size",new_kernel_size)
 		new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
 
 		new_conv = nn.Conv2d(new_kernel_size[1], net.out_channels,
@@ -183,6 +219,7 @@ def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool
 	if place == 'block':
 		def make_block_temporal(stage, this_segment):
 			blocks = list(stage.children())
+
 			print('=> Processing stage with {} blocks'.format(len(blocks)))
 			for i, b in enumerate(blocks):
 				blocks[i] = TemporalShift(b, n_segment=this_segment, n_div=n_div, concat = concat)
@@ -214,8 +251,12 @@ def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool
 					layer_count += 1
 				
 			return nn.Sequential(*blocks)
-
+		#print("n segment list",n_segment_list)
+		#print(concat_list)
+		#exit()
 		net.layer1 = make_block_temporal(net.layer1, n_segment_list[0], n_div, concat_list[0], layer_count = 0)
+		#net.layer1 = make_block_temporal(net.layer1, 8, 1, concat_list[0], layer_count = 0)
+		
 		net.layer2 = make_block_temporal(net.layer2, n_segment_list[1], n_div, concat_list[1], layer_count = 3)
 		net.layer3 = make_block_temporal(net.layer3, n_segment_list[2], n_div, concat_list[2], layer_count = 7)
 		net.layer4 = make_block_temporal(net.layer4, n_segment_list[3], n_div, concat_list[3], layer_count = 13)

@@ -8,12 +8,12 @@ from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 
 
-from ops.dataset_v3 import YouCookDataSetRcg
+from ops.dataset_slice import YouCookDataSetRcg
 from ops.models import TSN
 from ops.transforms import *
 from opts import parser
 from ops import dataset_config
-from ops.utils import AverageMeter, accuracy
+from ops.utils import AverageMeter, AUC
 from ops.temporal_shift import make_temporal_pool
 
 from tensorboardX import SummaryWriter
@@ -29,6 +29,7 @@ def main():
 	args = parser.parse_args()
 
 	num_class, train_list, val_list, args.root_path, prefix = dataset_config.return_dataset(args.dataset, args.modality)
+	num_class = 1
 	if args.train_list == "":
 		args.train_list = train_list
 	if args.val_list == "":
@@ -165,7 +166,9 @@ def main():
 			sd = {k: v for k, v in sd.items() if 'fc' not in k}
 		if args.modality != 'Flow' and 'Flow' in tune_from_list[0]:
 			sd = {k: v for k, v in sd.items() if 'conv1.weight' not in k}
-
+		#print(sd.keys())
+		#print("*"*50)
+		#print(model_dict.keys())
 		model_dict.update(sd)
 		model.load_state_dict(model_dict)
 
@@ -236,18 +239,23 @@ def main():
 	'''
 	
 	train_loader = torch.utils.data.DataLoader(
-		YouCookDataSetRcg(args.root_path, args.train_list,train=True,inputsize=crop_size),
-		#shuffle=True,
-		
+		YouCookDataSetRcg(args.root_path, args.train_list,train=True,inputsize=crop_size,hasPreprocess = False,\
+			hasWordIndex = True,),
+		shuffle=True,
+
+
 
 	)
 	val_loader = torch.utils.data.DataLoader(
-		YouCookDataSetRcg(args.root_path, args.val_list,val=True,inputsize=crop_size)
+		YouCookDataSetRcg(args.root_path, args.val_list,val=True,inputsize=crop_size,hasPreprocess = False,\
+			hasWordIndex = True,),
 
 	)
 	# define loss function (criterion) and optimizer
 	if args.loss_type == 'nll':
 		criterion = torch.nn.CrossEntropyLoss().cuda()
+	elif args.loss_type == "MSELoss":
+		criterion = torch.nn.MSELoss().cuda()
 	else:
 		raise ValueError("Unknown loss type")
 
@@ -295,16 +303,27 @@ def main():
 				'optimizer': optimizer.state_dict(),
 				'best_prec1': best_prec1,
 			}, is_best)
+		else:
+			save_checkpoint({
+				'epoch': epoch + 1,
+				'arch': args.arch,
+				'state_dict': model.state_dict(),
+				'optimizer': optimizer.state_dict(),
+				'best_prec1': best_prec1,
+			}, False)
+		#break
+		print("test pass")
 
 def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
 	losses = AverageMeter()
-	losses_extra = AverageMeter()
-	top1 = AverageMeter()
-	top5 = AverageMeter()
-	top1_extra = AverageMeter()
-	top5_extra = AverageMeter()
+	AUCs = AverageMeter()
+	#losses_extra = AverageMeter()
+	#top1 = AverageMeter()
+	#top5 = AverageMeter()
+	#top1_extra = AverageMeter()
+	#top5_extra = AverageMeter()
 
 	if args.no_partialbn:
 		model.module.partialBN(False)
@@ -316,89 +335,91 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	#print("308")
 	end = time.time()
 	for i, data in enumerate(train_loader):
-		#print("main 311")
-		#print(data)
-		#exit()
-		if len(data)==1:
+		print("data fetch finish ")
+
+		print(data)
+
+		if isinstance(data, bool):
 			continue
-		# measure data loading time
+
 		data_time.update(time.time() - end)
-		#print("315")
-		#print("/"*50)
-		#print(data)
-		'''
-		for d in data:
-			print(d)
-			print("317")
-			#[label, video, caption] = d #video = [[batch,frames,h,w,c], [audio], video_fps:tensor, audio_fps:tensor]
-			[segment,sentence,id,videos] = d
-			print("label=",label)
-			#print("video=",video)
-			#print(type(video))
-			#print(np.shape(video[0]))
-			print(caption)
-			label = label.cuda()
-			video = video[0].cuda()
-			print(video.size())
-			video = video.transpose(2,4)
-			print(video.size())
-			#caption = caption.cuda()
-			output, extra = model(video)
-			######################################################################################################################
-		'''
-		
-		[label, fileURL, filecontents] = data		##[label, URL, [[segment,sentence,id,videos], [], [], ...]
-		#print("label={},fileURL={}".format(label, fileURL))
-		label=label[0].cuda()
-		fileURL=fileURL[0] 				#for recording filename in result
-		
-		#print("label={},fileURL={}".format(label, fileURL))
-		input=torch.tensor([],dtype=torch.float).cuda()
-		for filecontent in filecontents:
-			#print(filecontent)
-			for f in filecontent[3]:
 
-				input = torch.cat((input, f.float().cuda()),1)
-		#videoclip = videoclip.view(8,3,224,224)
-		input = input.view(8,3,crop_size,crop_size)
-		#print(input.size())
+		
+		[URL, id, label, clips] = data	
+		input_video=torch.tensor([],dtype=torch.float).cuda()
+		input_caption=torch.tensor([],dtype=torch.long).cuda()
+		#cap_nums = []
+		for clip in clips:
+			video = clip[0]
+			caption = clip[1]
+			input_video = torch.cat((input_video, video.float().cuda()),1)
+			input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+			#cap_nums.append(clip[2])
+		
+		print(input_video.size())
+		print(input_caption.size())
 
-		#target = target.cuda()
+		input_video = input_video.view(1,-1,3,crop_size,crop_size)
+		input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
+		print(input_video.size())
+		print(input_caption.size())
+
 		target = label.cuda()
-		input_var = torch.autograd.Variable(input)
-		target_var = torch.autograd.Variable(label)
+		input_video_var = torch.autograd.Variable(input_video)
+		input_caption_var = torch.autograd.Variable(input_caption)
+		target_var = torch.autograd.Variable(target)
 
 		# compute output
 		wExtraLoss = 1 if args.prune == '' else 0.1
-		output, extra = model(input_var)
+		output = model(input_video_var, input_caption_var)
+		print("output size=",output.size())
+		print("target)var=",target_var.size())
+		print(output)
+		print(target_var)
+		#print("label size=",label.size())
 		loss_main = criterion(output, target_var)
-		extra_loss = criterion(extra, target_var)*wExtraLoss
-		loss = loss_main + extra_loss
-
+		#loss_main = 0
+		#lloss = torch.sub(output, target_var).squeeze()
+		#for l in lloss:
+		#	loss_main += l**2
+		#extra_loss = criterion(extra, target_var)*wExtraLoss
+		#loss = loss_main + extra_loss
+		loss = loss_main
+		print("loss=",loss)
+		losses.update(loss_main.item(), )
+		'''
 		# measure accuracy and record loss
 		prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 		losses.update(loss_main.item(), input.size(0))
 		top1.update(prec1.item(), input.size(0))
 		top5.update(prec5.item(), input.size(0))
-
+		'''
+		auc = AUC(output.data, target[0])
+		print("auc=",auc)
+		AUCs.update(auc)
+		print("after AUCs update")
+		'''
 		prec1_extra, prec5_extra = accuracy(extra.data, target, topk=(1, 5))
 		losses_extra.update(extra_loss.item(), input.size(0))
 		top1_extra.update(prec1_extra.item(), input.size(0))
 		top5_extra.update(prec5_extra.item(), input.size(0))
-
+		'''
 		# compute gradient and do SGD step
+		st = time.time()
 		loss.backward()
-
+		print("{0:*^50}".format("after backward\t"+str(time.time()-st)))
 		if args.clip_gradient is not None:
 			total_norm = clip_grad_norm_(model.parameters(), args.clip_gradient)
-
+		st = time.time()
 		optimizer.step()
+		print("{0:*^50}".format("after step\t"+str(time.time()-st)))
+		st = time.time()
 		optimizer.zero_grad()
-
+		print("{0:*^50}".format("after zero_grad\t"+str(time.time()-st)))
 		# measure elapsed time
 		batch_time.update(time.time() - end)
 		end = time.time()
-
+		'''
 		if i % args.print_freq == 0:
 			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
 					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -411,82 +432,119 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 			print(output)
 			log.write(output + '\n')
 			log.flush()
+		'''
+		if i % args.print_freq == 0:
+			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
+					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+					  
+					  'auc {auc.val:.4f} ({auc.avg:.3f})\t'
+					  .format(
+				epoch, i, len(train_loader), batch_time=batch_time,
+				data_time=data_time, loss=losses,  auc=AUCs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
+			print(output)
+			log.write(output + '\n')
+			log.flush()
 		#print("**"*50)
 		#break
+		#exit()
 
 	tf_writer.add_scalar('loss/train', losses.avg, epoch)
-	tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
-	tf_writer.add_scalar('acc/train_top5', top5.avg, epoch)
+	#tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
+	#tf_writer.add_scalar('acc/train_top5', top5.avg, epoch)
+	tf_writer.add_scalar('auc/train', AUCs.avg, epoch)
 	tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
 
 
 def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 	batch_time = AverageMeter()
+	data_time = AverageMeter()
 	losses = AverageMeter()
-	top1 = AverageMeter()
-	top5 = AverageMeter()
+	AUCs = AverageMeter()
 
 	# switch to evaluate mode
 	model.eval()
 
 	end = time.time()
 	with torch.no_grad():
+		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+			txt.write("epoch\t"+str(epoch)+"\n")
 		for i, data in enumerate(val_loader):
-			if len(data) == 1:
+			data_time.update(time.time() - end)
+			if isinstance(data, bool):
 				continue
-			[label, fileURL, filecontents] = data		##[label, URL, [[segment,sentence,id,videos], [], [], ...]
-			#print("label={},fileURL={}".format(label, fileURL))
-			label=label[0].cuda()
-			fileURL=fileURL[0] 				#for recording filename in result
 			
-			#print("label={},fileURL={}".format(label, fileURL))
-			input=torch.tensor([],dtype=torch.float).cuda()
-			for filecontent in filecontents:
-				print("filecontent")
-				print(len(filecontent[3]))
-				for f in filecontent[3]:
-					print("{0:*^50}".format("f"))
-					print(f.size())
-					input = torch.cat((input, f.float().cuda()),1)
-					print(input.size())
-			#videoclip = videoclip.view(8,3,224,224)
-			input = input.view(8,3,crop_size,crop_size)
-			#print(input.size())																				
-			# compute output
-			output, extra = model(input)
-			#print("output size",output.size())
+			[URL, id, label, clips] = data	
+			input_video=torch.tensor([],dtype=torch.float).cuda()
+			input_caption=torch.tensor([],dtype=torch.long).cuda()
+			#cap_nums = []
+			for clip in clips:
+				video = clip[0]
+				caption = clip[1]
+				input_video = torch.cat((input_video, video.float().cuda()),1)
+				input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+				#cap_nums.append(clip[2])			#for recording filename in result
+
+			input_video = input_video.view(1,-1,3,crop_size,crop_size)
+			input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
+			print(input_video.size())
+			print(input_caption.size())
+
 			target = label.cuda()
-			if args.dataset == 'ucf101':		#twice sample & full resolution
-				output = output.reshape(target.numel(), 2, -1).mean(1)
+			input_video_var = torch.autograd.Variable(input_video)
+			input_caption_var = torch.autograd.Variable(input_caption)
+			target_var = torch.autograd.Variable(target)
+
+			# compute output
+			wExtraLoss = 1 if args.prune == '' else 0.1
+			output = model(input_video_var, input_caption_var)
+			print("output size=",output.size())
+			print("target)var=",target_var.size())
+			print(output)
+			print(target_var)
+
 
 			loss = criterion(output, target)
 
-			# measure accuracy and record loss
-			prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+			auc = AUC(output.data, target[0])
+			print("auc=",auc)
 
-			losses.update(loss.item(), input.size(0))
-			top1.update(prec1.item(), input.size(0))
-			top5.update(prec5.item(), input.size(0))
+			AUCs.update(auc)
+
+			losses.update(loss.item(), )
+
 
 			# measure elapsed time
 			batch_time.update(time.time() - end)
 			end = time.time()
-
+			output = ('Test: [{0}/{1}]\t'
+						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+						
+						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
+				i, len(val_loader), batch_time=batch_time, loss=losses,
+					top5=AUCs))	
 			if i % args.print_freq == 0:
 				output = ('Test: [{0}/{1}]\t'
 						  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 						  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-						  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+						  
+						  'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
 					i, len(val_loader), batch_time=batch_time, loss=losses,
-					top1=top1, top5=top5))
+					 top5=AUCs))
 				print(output)
 				if log is not None:
 					log.write(output + '\n')
 					log.flush()
 
-	output = ('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Loss {loss.avg:.5f}'
-			  .format(top1=top1, top5=top5, loss=losses))
+
+			with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+				txt.write(output+"\n")
+
+			#break
+
+		output = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
+			  	.format(auc=AUCs, loss=losses))
 	print(output)
 	if log is not None:
 		log.write(output + '\n')
@@ -494,14 +552,14 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
 	if tf_writer is not None:
 		tf_writer.add_scalar('loss/test', losses.avg, epoch)
-		tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
-		tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
+		#tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
+		#tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
+		tf_writer.add_scalar('auc/test', AUCs.avg, epoch)
+	return AUCs.avg
 
-	return top1.avg
 
-
-def save_checkpoint(state, is_best):
-	filename = '%s/%s/ckpt.pth.tar' % (args.root_model, args.store_name)
+def save_checkpoint(state, is_best, ):
+	filename = '%s/%s/ckpt_%s.pth.tar' % (args.root_model, args.store_name, state['epoch'])
 	torch.save(state, filename)
 	if is_best:
 		shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))

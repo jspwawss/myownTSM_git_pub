@@ -47,6 +47,7 @@ class TSN(nn.Module):
         self.prune_list = prune_list
         
 
+
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
 
@@ -149,6 +150,9 @@ class TSN(nn.Module):
                 make_non_local(self.base_model, self.num_segments)
 
             self.base_model.last_layer_name = 'fc'
+
+
+
             self.input_size = 224
             self.input_mean = [0.485, 0.456, 0.406]
             self.input_std = [0.229, 0.224, 0.225]
@@ -270,6 +274,9 @@ class TSN(nn.Module):
         bn = []
         custom_ops = []
 
+        embedding_weight = []
+        gru_weight = []
+
         conv_cnt = 0
         bn_cnt = 0
         for m_name, m in self.named_modules():
@@ -320,6 +327,22 @@ class TSN(nn.Module):
                     bn.extend(list(m.parameters()))
             elif isinstance(m, torch.nn.LSTM):
                 extra_weight.extend(list(m.parameters()))
+
+            elif isinstance(m, torch.nn.modules.sparse.Embedding):
+                ps = list(m.parameters())
+                #print(m_name)
+                #print(ps)
+                for p in ps:
+
+                    embedding_weight.append(p)
+            elif isinstance(m, torch.nn.modules.rnn.GRU):
+                ps = list(m.parameters())
+                #print(m_name)
+                for p in ps:
+                    #print(ps)
+
+                    gru_weight.append(p)
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
@@ -351,64 +374,81 @@ class TSN(nn.Module):
              'name': "lr5_weight"},
             {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
              'name': "lr10_bias"},
-        ]
 
-    def forward(self, input, no_reshape=False):
-        #print("in model forward")
-        #print("input size=",input.size())
+
+            {"params": embedding_weight, "lr_mult":5, "decay_mult":1,
+            "name":"embedding_weight"},
+            {"params": gru_weight, "lr_mult":5, "decay_mult":1,
+            "name":"gru_weight"},
+        ]
+    def trainEncoder(self, input_tensor):
+        pass
+
+    def forward(self, input, input_caption, no_reshape=False):
+        print("in model forward")
+        print("input size=",input.size())
+        print(input_caption)
+        print("-"*50)
+
         if not no_reshape:
             if self.modality == "RGB":
-                #print("models 357")
+                print("models 357")
                 sample_len = (3 * self.new_length) if self.new_length == 1 else 4
             elif self.modality == "Depth":
-                #print("models 360")
+                print("models 360")
                 sample_len = 1 * self.new_length
             elif self.modality == "Flow":
-                #print("models 363")
+                print("models 363")
                 sample_len = 2 * self.new_length
             #sample_len = (3 if self.modality in ["RGB", "Depth"] else 2) * self.new_length
             elif self.modality == 'RGBDiff':
-                #print("models 367")
+                print("models 367")
                 sample_len = 3 * self.new_length
                 input = self._get_diff(input)
 
             if self.extra_temporal_modeling:
-                #print("models 371")
+                print("models 371")
 
                 base_out, spatial_feature = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))   # base_out -> (Batch_size * segment, 2048)
 
                 #print("base_out size",base_out.size())
                 #print("spatial_freature=",spatial_feature.size())
             else:
-                #print("models 375")
-                base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))
+                print("models 375")
+                print("input size",input.size())
+                #print(input.view((-1, sample_len) + input.size()[-2:]))
+                print((-1, sample_len) + input.size()[-2:])
+                
+                base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]),input_caption.view(-1, input_caption.size()[2],1))
+                print("base out size",base_out.size())
             
         else:
-            #print("models 379")
-            base_out = self.base_model(input)
-
+            print("models 379")
+            base_out = self.base_model(input, input_caption)
+            print("base out size",base_out.size())
         if self.dropout > 0 and 'efficientnet' not in self.base_model_name:
-            #print("models 383")
+            print("models 383")
             base_out = self.new_fc(base_out)
+            print("base out size",base_out.size())
 
         if not self.before_softmax:
-            #print("models 387")
+            print("models 387")
             base_out = self.softmax(base_out)
         
         output = 0
         if self.reshape:
-            #print("models 392")
+            print("models 392")
             if self.is_shift and self.temporal_pool:
-                #print("models 394")
+                print("models 394")
                 base_out = base_out.view((-1, self.num_segments // 2) + base_out.size()[1:])
                 output = self.consensus(base_out)
 
                 if self.extra_temporal_modeling != "":
-                    #print("models 399")
+                    print("models 399")
                     return output.squeeze(1) + spatial_feature
 
             elif self.extra_temporal_modeling:
-                #print("models 403")
+                print("models 403")
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
                 spatial_feature = spatial_feature.view((-1, self.num_segments) + spatial_feature.size()[1:])
 
@@ -418,11 +458,26 @@ class TSN(nn.Module):
                 
                 return output.squeeze(1), spatial_feature.squeeze(1)
             else:
-                #print("models 413")
+                #print(base_out)
+
+                output = nn.Softmax(dim=0)(base_out)
+                #print(output)
+                #print("outputsize-----",output.size())
+                return output.squeeze(1).unsqueeze(0)
+                #return base_out.squeeze(1).unsqueeze(0)
+                #return base_out.squeeze(1)
+                print("models 413")
+                print("base_out size=",base_out.size())
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])     #(batch_size, num_segment, class_num)
+                print("base_out size=",base_out.size())
+                base_out = base_out.view((-1) + base_out.size()[1:])
+                print("base_out size=",base_out.size())
                 output = self.consensus(base_out)
-            #print("models 416")
-            return output.squeeze(1)
+                print("output size", output.size())
+            print("models 416")
+            print("outputsize+++++",output.size())
+            #return output.squeeze(1)
+            return output.unsqueeze(0)
 
     def _get_diff(self, input, keep_rgb=False):
         input_c = 3 if self.modality in ["RGB", "RGBDiff"] else 2

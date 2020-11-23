@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 
 def softmax(scores):
     es = np.exp(scores - scores.max(axis=-1)[..., None])
@@ -25,9 +25,24 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
+def AUC(output, target):
+    print("output is ",output)
+    print("target is ",target)
+    #>0.8 => True   || 0.8 is my threshold
+    output_cpu=output.cpu()
+    target_cpu = target.cpu()
+    pred = torch.where(output_cpu>0.8,torch.ones(output.size()),torch.zeros(output.size()))
+    tp = torch.eq(pred,target_cpu)
+    acc = torch.sum(tp)
+    auc = acc/(output.size()[1]+target.size()[0]-acc)
+    print("auc in auc is ",auc)
+    return auc
+    
+
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
     print("output size in accuracy,",output.size())
+
     maxk = max(topk)
     batch_size = target.size(0)
 

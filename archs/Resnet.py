@@ -1,12 +1,20 @@
+from __future__ import unicode_literals, print_function, division
 import torch
 import torch.nn as nn
 from torchvision.models.utils import load_state_dict_from_url
 from ops.temporal_modeling import *
 
+import unicodedata
+import string
+import re
+import random
+import time
+import pickle
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
            'wide_resnet50_2', 'wide_resnet101_2']
+
 
 
 model_urls = {
@@ -25,6 +33,11 @@ TFDEM = False
 SEGMENT = 8
 CLASSES = 101
 
+
+def load_object(filename):
+    with open(filename,"rb") as dic:
+        obj = pickle.load(dic)
+        return obj
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -119,11 +132,52 @@ class Bottleneck(nn.Module):
         return out
 
 
+class EncoderRNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(EncoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.embedding = nn.Embedding(input_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size)
+
+    def forward(self, input, hidden):
+        print("in EncoderRNN")
+        embedded = self.embedding(input).view(1, 1, -1)
+        print(embedded.size())
+        output = embedded
+        print(output.size())
+        output, hidden = self.gru(output, hidden)
+        print(output.size(),hidden.size())
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size,).cuda()
+
+class DecoderRNN(nn.Module):
+    def __init__(self, hidden_size, output_size):
+        super(DecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.embedding = nn.Embedding(output_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size)
+        self.out = nn.Linear(hidden_size, output_size)
+        self.softmax = nn.LogSoftmax(dim=1)
+
+    def forward(self, input, hidden):
+        output = self.embedding(input).view(1, 1, -1)
+        output = F.relu(output)
+        output, hidden = self.gru(output, hidden)
+        output = self.softmax(self.out(output[0]))
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros((1, 1, self.hidden_size),dtype=torch.float).cuda()
+
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None):
+                 norm_layer=None, decoder=None, encoder=None):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -154,6 +208,16 @@ class ResNet(nn.Module):
                                        dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
+        #self.fc = nn.Linear(512 * block.expansion, 1)
+        #self.decoder = decoder(256,100) #if add, model optim paramter needs to add
+        #self.encoder = encoder(64,256)
+        #self.input_size = 64
+        self.hidden_size = 128
+        self.word2index = load_object("engDict.pkl")
+        self.input_size = len(self.word2index)+2 #+sos eos
+        self.embedding = nn.Embedding(self.input_size, self.hidden_size) #prevent errors
+        self.gru = nn.GRU(self.hidden_size, self.hidden_size)
+
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -173,7 +237,23 @@ class ResNet(nn.Module):
                     nn.init.constant_(m.bn2.weight, 0)
         if TFDEM:
             self.extra_layer0 = TemporalModeling(num_segment = SEGMENT, num_class = CLASSES, backbone = 'ResNet')
-        
+    
+    def initHidden(self):
+        return torch.zeros((1, 1, self.hidden_size),dtype=torch.float).cuda()
+    def encoder(self,input, hidden ):
+        print("in encoder")
+        print(input)
+        embedded = self.embedding(input).view(1, 1, -1)
+        print(embedded)
+        print(embedded.size())
+        output = embedded
+        print(output.size())
+        output, hidden = self.gru(output, hidden)
+        print(output.size(),hidden.size())
+        print(embedded)
+        print(output)
+        return output, hidden
+
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -199,24 +279,94 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
+    def forward(self, x,y):
+        #encoder_outputs = torch.zeros(max_length, encoder.hidden_size).cuda()
+        #encoder_hidden = self.encoder.initHidden()
+        encoder_hidden = self.initHidden()
+        print("encoderf hidden size",encoder_hidden.size())
+        #print(y.size())
+        hidden_state = torch.zeros((y.size()[0],self.hidden_size),dtype=torch.float).cuda()
+        #EOS = torch.ones(1, dtype=torch.long).cpu()
+        print("+"*50)
+        print(y.size())
 
+        print(y)
+        for i in range(y.size()[0]):
+            #print("cap_num.data*********{}".format(cap_num.data))
+
+            for j in range(y.size()[1]):
+                print("i={},j={}".format(i,j))
+                print(y)
+                print(y[i,j])
+                print("{0:*^50}".format("encoder hidden"))
+                #a = i.data
+                #a = a.cpu()
+                #print(a)
+                #print(i)
+                print(encoder_hidden)
+                #encoder_outputs, encoder_hidden = self.EncoderRNN(ic, encoder_hidden)
+                tmp , encoder_hidden = self.encoder(y[i,j], encoder_hidden)
+                print(encoder_hidden)
+                print("encoder finish\t", encoder_hidden.size(),"\t",tmp.size())
+                if y[i,j] == 1: #EOS
+                    print("eos")
+                    break
+                print("eos test pass")
+            print(encoder_hidden.view(1,-1))
+            #torch.cat((hidden_state, encoder_hidden.view(1,-1).float().cuda()),0)
+            hidden_state[i] = encoder_hidden.view(1,-1)
+            print("hidden state size=",hidden_state.size())
+            print(hidden_state)
+            encoder_hidden = self.initHidden()
+        print("hidden state size=",hidden_state.size())
+        print("resnet")
+        print("x.size",x.size())
+        x = self.conv1(x)
+        print("conv1 x.size",x.size())
+        x = self.bn1(x)
+        print("bn1 x.size",x.size())
+        x = self.relu(x)
+        print("relu x.size",x.size())
+        x = self.maxpool(x)
+        print("maxpool x.size",x.size())
         if TFDEM:
             spatial_temporal_feature = self.extra_layer0(x)
+        hidden_state = hidden_state.view(x.size()[0],1,x.size()[2],-1)
 
+        # concatenate caption feature with video feature
+        print("encoder hidden size=",hidden_state.size())
+        #cat = torch.zeros((x.size()[0],x.size()[1],x.size()[2],x.size()[3]+hidden_state.size()[-1]), dtype=torch.float).cuda()
+        cat = hidden_state.repeat(1,64,1,1).cuda()
+        print("after cat repeat size=", cat.size())
+        #cat_var = torch.autograd.Variable(cat)
+        cat_var = torch.cat((x,cat),3).cuda()
+        #for frame in range(x.size()[0]):
+        #    for channel in range(x.size()[1]):
+        #        for w in range(x.size()[2]):
+
+                    #cat_var[frame, channel, w,:x.size()[3]] = x[frame, channel, w]
+                    #cat_var[frame, channel, w,x.size()[3]:] = hidden_state[frame, 0, w]
+
+        x = torch.autograd.Variable(cat_var).cuda()
+        print("x size = ",x.size())
         x = self.layer1(x)
+        print("layer1 x.size",x.size())
         x = self.layer2(x)
+        print("layer2 x.size",x.size())
         x = self.layer3(x)
+        print("layer3 x.size",x.size())
+
         x = self.layer4(x)
+        print("layer4 x.size",x.size())
 
         x = self.avgpool(x)
-
+        print("avgpol x.size",x.size())
         x = torch.flatten(x, 1)
+
+        print("*"*50)
+        print(x.size())
         x = self.fc(x)
+        #x, hidden = self.decoder(x)
 
         if TFDEM:
             return x, spatial_temporal_feature
@@ -225,7 +375,7 @@ class ResNet(nn.Module):
 
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
-    model = ResNet(block, layers, **kwargs)
+    model = ResNet(block, layers, **kwargs, decoder=DecoderRNN, encoder=EncoderRNN)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)
@@ -250,7 +400,8 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
         
         model_dict.update(state_dict)
         model.load_state_dict(model_dict)
-
+    print("in resnet 312")
+    print(model)
     return model
 
 

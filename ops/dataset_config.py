@@ -4,7 +4,8 @@
 # {jilin, songhan}@mit.edu, ganchuang@csail.mit.edu
 
 import os
-ROOT_DATASET = '/home/chcheng08/NTHU/lju'
+#ROOT_DATASET = '/home/chcheng08/NTHU/lju'
+ROOT_DATASET = r"/home/share"
 
 def return_MSASL(modality):
     filename_categories = 100
