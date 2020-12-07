@@ -38,23 +38,23 @@ class TemporalShift(nn.Module):
 	def forward(self, x):
 		
 		#x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace)
-		print("in temporal_shift forward")
-		print("x size=",x.size())
+		#print("in temporal_shift forward")
+		#print("x size=",x.size())
 		self.n_segment = x.size()[0]
 		#self.fold_div = x.size()[0]
 		#print(self.inplace)		#False
 		#exit()
 		x = self.shift(x, self.n_segment,fold_div= self.fold_div, inplace =self.inplace)
 		if self.Prune:
-			print("prune")
+			#print("prune")
 			x = self.prune(x, prune_list = self.prune_list)
 		
 		if self.Concat:
-			print("concat")
+			#print("concat")
 			x = self.concat(x, self.n_segment, fold_div=self.fold_div)
-		print("after concate x size",x.size())
-		print("going to resnet50-")
-		print(self.net)
+		#print("after concate x size",x.size())
+		#print("going to resnet50-")
+		#print(self.net)
 		return self.net(x)
 
 	@staticmethod
@@ -63,10 +63,10 @@ class TemporalShift(nn.Module):
 		nt, c, h, w = x.size()
 		n_batch = nt // n_segment
 		#n_batch = 1
-		print("n_batch=",n_batch)
-		print("x.size()=",x.size())
-		print("n_segment",n_segment)
-		print("fold_div",fold_div)
+		#print("n_batch=",n_batch)
+		#print("x.size()=",x.size())
+		#print("n_segment",n_segment)
+		#print("fold_div",fold_div)
 		x = x.view(n_batch, n_segment, c, h, w)
 		#x = x.view(1,-1,c,h,w)
 		
@@ -78,18 +78,18 @@ class TemporalShift(nn.Module):
 			return out.view(nt, c, h, w)
 		else:
 			out = torch.zeros_like(x)
-			print("fold,",fold)
-			print(out[0,0,0,0,0])
-			print("out size",out.size())
+			#print("fold,",fold)
+			#print(out[0,0,0,0,0])
+			#print("out size",out.size())
 			out[:, :-1, :fold] = x[:, 1:, :fold]  # shift left(up)
-			print(out[0,0,0,0,0])
-			print(out.size())
+			#print(out[0,0,0,0,0])
+			#print(out.size())
 			out[:, 1:, fold: 2 * fold] = x[:, :-1, fold: 2 * fold]  # shift right(down)
-			print(out[0,0,0,0,0])
-			print(out.size())
+			#print(out[0,0,0,0,0])
+			#print(out.size())
 			out[:, :, 2 * fold:] = x[:, :, 2 * fold:]  # not shift
-			print(out[0,0,0,0,0])
-			print(out.size())
+			#print(out[0,0,0,0,0])
+			#print(out.size())
 			return out.view(nt, c, h, w)
 
 	def prune(self, x, prune_list = []):
@@ -107,7 +107,7 @@ class TemporalShift(nn.Module):
 			return x_prune
 
 	def concat(self, x, n_segment, fold_div=8):
-		print("x,size(),",x.size())
+		#print("x,size(),",x.size())
 		nt, c, h, w = x.size()
 		n_batch = nt // n_segment
 		x = x.view(n_batch, n_segment, c, h, w)
@@ -115,26 +115,26 @@ class TemporalShift(nn.Module):
 
 		fold = c // fold_div
 		fold2 = fold // 2
-		print("in concat")
-		print("fold={},fold2={}".format(fold,fold2))
+		#print("in concat")
+		#print("fold={},fold2={}".format(fold,fold2))
 		out = torch.zeros(n_batch, n_segment, c+2*fold2, h, w, dtype=x.dtype, layout=x.layout, device=x.device)
-		print(out[0,0,0,0,0])
+		#print(out[0,0,0,0,0])
 		out[:, :-2, c:c+fold2] = x[:, 2:, c - 2 * fold2:c - fold2]		# shift left(up)
-		print(out[0,0,0,0,0])
+		#print(out[0,0,0,0,0])
 		out[:, 2:, c+fold2:c+2*fold2] = x[:, :-2, c - fold2:]			# shift right(down) 
-		print(out[0,0,0,0,0])
+		#print(out[0,0,0,0,0])
 		out[:, :, :c] = x[:, :, :]  									# not shift
-		print(out[0,0,0,0,0])
+		#print(out[0,0,0,0,0])
 
 		return out.view(nt, c+2*fold2, h, w)
 
 	def fill_param_to_extra_channels(self, net, new_input_channel):
-		print("in tmp_shift.py ::fill_param_to_extra_channels")
+		#print("in tmp_shift.py ::fill_param_to_extra_channels")
 		params = [x.clone() for x in net.parameters()]
 		kernel_size = params[0].size()
-		print("kernel_size",kernel_size)
+		#print("kernel_size",kernel_size)
 		new_kernel_size = kernel_size[:1] + (int(new_input_channel), ) + kernel_size[2:]
-		print("new_kernel_size",new_kernel_size)
+		#print("new_kernel_size",new_kernel_size)
 		new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
 
 		new_conv = nn.Conv2d(new_kernel_size[1], net.out_channels,

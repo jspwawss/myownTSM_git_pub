@@ -26,16 +26,56 @@ class AverageMeter(object):
 
 
 def AUC(output, target):
+    #print("output is ",output)
+    #print("target is ",target)
+    #>0.8 => True   || 0.8 is my threshold
+    #output_cpu=output.cpu()
+    #target_cpu = target.cpu()
+    #output = target
+    
+    pred = torch.where(output>0.8,torch.ones(output.size()).cuda(),torch.zeros(output.size()).cuda()).cuda()
+    #pred[0] = 1
+    #print(pred)
+
+    tp = torch.eq(pred,target).cuda()
+    #print("tp=",tp)
+    acc = torch.sum(tp)
+    accdata = acc.float()
+    #print("intersection=",accdata)
+    #print(output.size())
+    #print(type(target.size()))
+    if not output.size():
+        a = 1+1-accdata
+    else:
+        a = output.size()[0]+target.size()[0]-accdata
+    #print("area =",a)
+    auc = float(acc.data/a.data)
+    #print("auc in auc is ",auc)
+    return auc
+
+def testAUC(output, target):
     print("output is ",output)
     print("target is ",target)
     #>0.8 => True   || 0.8 is my threshold
-    output_cpu=output.cpu()
-    target_cpu = target.cpu()
-    pred = torch.where(output_cpu>0.8,torch.ones(output.size()),torch.zeros(output.size()))
-    tp = torch.eq(pred,target_cpu)
+    #output_cpu=output.cpu()
+    #target_cpu = target.cpu()
+    #output = target
+    
+    pred = torch.where(output>0.8,torch.ones(output.size()),torch.zeros(output.size()))
+    #pred[0] = 1
+    #print(pred)
+
+    tp = torch.eq(pred,target)
+    #print("tp=",tp)
     acc = torch.sum(tp)
-    auc = acc/(output.size()[1]+target.size()[0]-acc)
-    print("auc in auc is ",auc)
+    accdata = acc.float()
+    #print("intersection=",accdata)
+    #print(output.size()[0])
+    #rint(target.size()[1])
+    a = output.size()[0]+target.size()[0]-accdata
+    print("area =",a)
+    auc = float(acc.data/a.data)
+    #print("auc in auc is ",auc)
     return auc
     
 
@@ -55,3 +95,11 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
+
+
+if __name__ == '__main__':
+    import torch
+    output = torch.tensor([0,0,0,1,1],dtype=torch.float)
+    target = torch.tensor([1,1,1,1,1],dtype=torch.float)
+    auc = testAUC(output,target)
+    print("auc is ",auc)

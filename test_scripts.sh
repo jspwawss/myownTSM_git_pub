@@ -5,6 +5,7 @@ python3 test_models.py ucf101 \
     --weights=${RGB_checkpoint_path}/ckpt.best.pth.tar \
     --test_list=/home/share/UCF101/file_list/ucf101_rgb_val_split_3.txt \
     --test_segments=8 --test_crops=1 --full_res --wholeFrame --softmax \
+
     --batch_size=1 \
     --save-scores=${RGB_checkpoint_path}/ucf101_scores 2> test_err.log
     

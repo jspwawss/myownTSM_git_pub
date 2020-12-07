@@ -144,6 +144,25 @@ class VideoRecord(object):
 
 
 class YouCookDataSetRcg(data.Dataset):
+    '''
+    def __new__(cls, root_path = r'/home/share/YouCook',list_file=r"/home/share/YouCook",
+                num_segments=8, new_length=1, modality="RGB",
+                train=False,test=False,val=False,
+                vtmpl = r"{}.mp4", ttmpl=r"{}.txt", ftmpl=r"image_{}.jpg",
+                slice=False, recognition=False,
+                transforms=torchvision.transforms.Compose([
+                    torchvision.transforms.CenterCrop((256,256)),
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+                    
+
+                    ]),
+                    inputsize = 224, hasWordIndex = False, hasPreprocess = False,
+                ):
+        print("in new")
+        return object.__new__(cls)
+    '''
+
     def __init__(self, root_path = r'/home/share/YouCook',list_file=r"/home/share/YouCook",
                 num_segments=8, new_length=1, modality="RGB",
                 train=False,test=False,val=False,
@@ -178,7 +197,7 @@ class YouCookDataSetRcg(data.Dataset):
 
         self.hasPreprocess = hasPreprocess
         self.hasWordIndex = hasWordIndex
-        if not hasWordIndex:
+        if not self.hasWordIndex:
             #print("not hasWordIndex")
             word2tensor(folderPath=os.path.join(self.root_path,"captions_v2"))
             print("not hasWordIndex")
@@ -203,14 +222,16 @@ class YouCookDataSetRcg(data.Dataset):
         #self.traininglist =[]
         #self.validationlist=[]
         self._label2Dict()
-        print("hasPreprocess" ,hasWordIndex)
+        print("hasPreprocess" ,hasPreprocess)
 
-        if not hasPreprocess:
+        if not self.hasPreprocess:
             self._getAnnotation()
         else:
-            self._getPreprocess(os.path.join(self.root_path,"preprocessDataset","dataset_"+self.mode+".pkl"))
+            self._getPreprocess(os.path.join(self.root_path,"preprocessDataset","dataset_"+self.mode+".pth"))
     def _getPreprocess(self, filename:str):
-        self.llist = load_object(filename)
+        print("in _get preprocess")
+        self.llist = torch.load(filename)
+        print(len(self.llist))
 
     def _getAnnotation(self):#only include train(1333) and val(457) = 1790
         with open(os.path.join(self.root_path,"annotations","youcookii_annotations_trainval.txt"),"r") as _anntxt:
@@ -239,7 +260,7 @@ class YouCookDataSetRcg(data.Dataset):
         #annotations = items["annotations"]
         try:    #successful download from youtube
             if not os.path.isdir(os.path.join(self.root_path,"image_v2",str(id),URL)):
-                return -1
+                return False
 
             start = segment[0]
             end = segment[1]
@@ -271,7 +292,7 @@ class YouCookDataSetRcg(data.Dataset):
 
         except Exception as e:
             print(e)
-            return -1
+            return False
 
     def _getVideo(self,id:str=None, URL:str=None, idx:str=None):    #get video clip in caption time
                             #return [video clip]
@@ -283,8 +304,8 @@ class YouCookDataSetRcg(data.Dataset):
             pass
         #print("id={},url={}".format(type(id),type(URL)))
         filename = os.path.join(self.root_path,"image_v2",str(id),URL,self.ftmpl.format(str(idx)))
-        print("{0:*^50}".format("in getvideo"))
-        print(filename,"is ",os.path.isfile(filename))
+        #print("{0:*^50}".format("in getvideo"))
+        #print(filename,"is ",os.path.isfile(filename))
         #return torch.tensor(np.zeros((1,3,256,256)))
         try:
             #s=time.time()
@@ -338,18 +359,18 @@ class YouCookDataSetRcg(data.Dataset):
         #print("---after readvideo----")
         
         return torch.tensor(self.cropVideo)  #origin shape[frames,360,640,3] -->[frames, 3, 640, 360] -->[frames, 3, 224,224] and not normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-        pass                
+                        
 
     def _getCaptions(self,id:str=None, URL:str=None, idx:str=None): #get video captions
                                #return [[captions, start time, endtime],[captions, start, end], ...]
-        print("{0:*^50}".format("in _getCaptions"))
+        #print("{0:*^50}".format("in _getCaptions"))
         #print(os.path.join(self.root_path,"captions",species,self.ttmpl.format(title)),"is ",os.path.isfile(
         #    os.path.join(self.root_path,"captions",species,self.ttmpl.format(title))))
 
         captions = str("")
         try:
             
-            with open(os.path.join(self.root_path,"captions_v2",id,self.ttmpl.format(URL)),"r") as captxt:
+            with open(os.path.join(self.root_path,"captions_v6",id,self.ttmpl.format(URL)),"r") as captxt:
                 lines = captxt.read().strip().split("\n\n")
                 
                 for line in lines:
@@ -361,7 +382,7 @@ class YouCookDataSetRcg(data.Dataset):
                     #print(line)
                     #exit()
                     
-                    print(line)
+                    #print(line)
                     start = line[1].split("-->")[0]
                     end = line[1].split("-->")[1]
                     sstart = start.split(",")[0].split(":")
@@ -435,14 +456,19 @@ class YouCookDataSetRcg(data.Dataset):
 
         pass
 
+    def _getMode(self):
+        return [self.mode, self.hasPreprocess, self.hasWordIndex]
     def __len__(self):  #for dataset iter need
         return len(self.llist)
     def __getitem__(self, index):   #for dataset iter need
                                     #return [URL, id, label, clip]
                                     #label = tensor([0,1,0,1,....])
                                     #clip = [[video, caption], [],...]
-
-
+        #print("_gettiem")
+        #print(self._getMode())
+        #print(self.mode)
+        #print(self.hasPreprocess)
+        #exit()
         if not self.hasPreprocess:
             #self.index = index
 
@@ -466,48 +492,64 @@ class YouCookDataSetRcg(data.Dataset):
                 #print(item[3])
                 #print((int(item[3]))//10+1)
                 #exit()
-                clip = [None] * ((int(item[3]))//10+1)           #take one frame each 10 seconds
+                if ((int(item[3]))//10+1) < 50:
+                    l = (int(item[3]))//10+1
+                else:
+                    l = 50
+                clip = [None] * (l+1)         #take one frame each 10 seconds
+
                 #print(item[3])
                 #print(len(clip))
                 if  not os.path.isdir(os.path.join(self.root_path, "image_v2",str(id),URL)):
-                    return -1
+                    with open("imgDNE.txt","a+") as txt:
+                        txt.write(str(id)+"\t"+str(URL)+"\n")
+                    print("img dne")
+                    return False
                 for dirpath, dianames, filenames in os.walk(os.path.join(self.root_path, "image_v2",str(id),URL)):
                     
                     
                     for filename in filenames:
                         idx = filename.split(".")[0].split("_")[-1]
                         #print(idx)
-                        if int(idx) % 10 != 0:
+                        if (int(idx) % (item[3]//(l-1))) != 0:
                             continue
+                        #if int(idx) // 10 >=70:
+                        #    continue
                         idx = int(idx) 
                         #s = time.time()
-                        print("{0:*^50}".format("idx "+str(idx)))
+                        #print("{0:*^50}".format("idx "+str(idx)))
                         video = self._getVideo(id=id,URL=URL,idx=idx)
                         #print("after get video")
                         #e = time.time()
                         #print("video time = ",e-s)
                         if isinstance(video, bool) :
                             print("isinstance")
-                            return -1
+                            return False
                         #s = time.time()
                         captions, cap_num = self._getCaptions(id=id,URL=URL,idx=idx)
                         #e=time.time()
                         #print("caption time = ",e-s)
-                        print(captions)
+                        #print(captions)
                         #print(item[3])
                         #print(idx)
                         #print(len(clip))
-                        print(cap_num)
-                        print("after _getCaptions")
-                        print(int(idx)//10)
-                        print(len(clip))
-                        print(item[3])
-                        print()
-                        clip[int(idx)//10] = [video,captions,cap_num]
+                        #print(cap_num)
+                        #print("after _getCaptions")
+                        #print("idx = ",int(idx))
+                        #print("l=",l)
+                        #print("clip=",len(clip))
+                        #print("item=",item[3])
+                        #print(int(idx)//int(item[3]//(l-1)))
+                        try:
+                            clip[int(idx)//int(item[3]//(l-1))] = [video,captions]
+                        except:
+                            clip[-1] = [video, captions]
                     break
                     
                 #print("-"*50)
-                label = torch.zeros(((int(item[3]))//10+1),dtype=torch.float)
+                while clip[-1] is None:
+                    clip.pop()
+                label = torch.zeros(len(clip),dtype=torch.float)
                 #print(label)
                 #print("-"*50)
                 for a in annotation:
@@ -515,7 +557,7 @@ class YouCookDataSetRcg(data.Dataset):
                     segment = a["segment"]
 
                     for i in range(segment[0],segment[1]+1):
-                        i = int(i) //10
+                        i = int(i) //(int(item[3]//(l-1)))
                         label[i] = True
                 #print("label.size()",label.size())
                 rst.append(label)
@@ -529,6 +571,8 @@ class YouCookDataSetRcg(data.Dataset):
                 return rst   
 
             except Exception as e:
+                with open("dataerrrrrr.txt","a+") as txt:
+                    txt.write(str(rst)+"\n")
                 print("get item")
                 print(e)
                 #exit()
@@ -537,7 +581,7 @@ class YouCookDataSetRcg(data.Dataset):
                     #exit()
                 return False
         else:
-            return self.llist(index)
+            return self.llist[index]
 
         
         pass
@@ -546,8 +590,9 @@ class YouCookDataSetRcg(data.Dataset):
 if __name__ == "__main__":
     #word2tensor()
     #exit()
-    #rst = load_object(os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train.pkl"))
-    #print(rst)
+    #rst = load_object(os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train.pth"))
+    #rst = torch.load(os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train_1.pth"))
+    #print(rst[0])
     #print(len(rst))
     #exit()
     
@@ -556,15 +601,40 @@ if __name__ == "__main__":
 
     #exit()
     crop_size = 224
-    dataset = YouCookDataSetRcg(train=True,inputsize=crop_size)
+    dataset = YouCookDataSetRcg(val=True,inputsize=crop_size, hasWordIndex=True, hasPreprocess=False)
+    dataset1 = YouCookDataSetRcg(train=True,inputsize=crop_size, hasWordIndex=False, hasPreprocess=False)
+    #print(dataset._getMode())
+    #print(dataset1._getMode())
     rst = []
-    for i in dataset:
-        print("ayaya")
-        print(i)
-        rst.append(i)
+    #print(dataset == dataset1)
+    #exit()
+    try:
+        for i in dataset:
+            #print(i)
+            if isinstance(i, bool):
+                print(i)
+                continue
+            print("ayaya")
+            #print(i)
+            
+            [URL, id, label, clips] = i	
+            for clip in clips:
+                video = clip[0]
+                caption = clip[1]
+            rst.append(i)
+            #save_object(rst, os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train.pkl"))
+            #break
+            #print(i)
+            #print("ayaya")
+            #exit()
+        print("test pass")
+        torch.save(rst,os.path.join("/home/share/YouCook","preprocessDataset", "dataset_val.pth"))
+        print("torch pass")
         #save_object(rst, os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train.pkl"))
-        #break
-        #print(i)
-        #print("ayaya")
-        #exit()
-    #save_object(rst, os.path.join("/home/share/YouCook","preprocessDataset", "dataset_train.pkl"))
+        #print("pickle pass")
+    except Exception as e:
+        
+        print(i)
+        print(e)
+
+    

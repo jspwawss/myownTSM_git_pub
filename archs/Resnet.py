@@ -207,6 +207,7 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.lastconv = nn.Conv1d(512 * block.expansion, 1, kernel_size=1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
         #self.fc = nn.Linear(512 * block.expansion, 1)
         #self.decoder = decoder(256,100) #if add, model optim paramter needs to add
@@ -241,17 +242,17 @@ class ResNet(nn.Module):
     def initHidden(self):
         return torch.zeros((1, 1, self.hidden_size),dtype=torch.float).cuda()
     def encoder(self,input, hidden ):
-        print("in encoder")
-        print(input)
+        #print("in encoder")
+        #print(input)
         embedded = self.embedding(input).view(1, 1, -1)
-        print(embedded)
-        print(embedded.size())
+        #print(embedded)
+        #print(embedded.size())
         output = embedded
-        print(output.size())
+        #print(output.size())
         output, hidden = self.gru(output, hidden)
-        print(output.size(),hidden.size())
-        print(embedded)
-        print(output)
+        #print(output.size(),hidden.size())
+        #print(embedded)
+        #print(output)
         return output, hidden
 
 
@@ -283,61 +284,61 @@ class ResNet(nn.Module):
         #encoder_outputs = torch.zeros(max_length, encoder.hidden_size).cuda()
         #encoder_hidden = self.encoder.initHidden()
         encoder_hidden = self.initHidden()
-        print("encoderf hidden size",encoder_hidden.size())
+        #print("encoderf hidden size",encoder_hidden.size())
         #print(y.size())
         hidden_state = torch.zeros((y.size()[0],self.hidden_size),dtype=torch.float).cuda()
         #EOS = torch.ones(1, dtype=torch.long).cpu()
-        print("+"*50)
-        print(y.size())
+        #print("+"*50)
+        #print(y.size())
 
-        print(y)
+        #print(y)
         for i in range(y.size()[0]):
             #print("cap_num.data*********{}".format(cap_num.data))
 
             for j in range(y.size()[1]):
-                print("i={},j={}".format(i,j))
-                print(y)
-                print(y[i,j])
-                print("{0:*^50}".format("encoder hidden"))
+                #print("i={},j={}".format(i,j))
+                #print(y)
+                #print(y[i,j])
+                #print("{0:*^50}".format("encoder hidden"))
                 #a = i.data
                 #a = a.cpu()
                 #print(a)
                 #print(i)
-                print(encoder_hidden)
+                #print(encoder_hidden)
                 #encoder_outputs, encoder_hidden = self.EncoderRNN(ic, encoder_hidden)
                 tmp , encoder_hidden = self.encoder(y[i,j], encoder_hidden)
-                print(encoder_hidden)
-                print("encoder finish\t", encoder_hidden.size(),"\t",tmp.size())
+                #print(encoder_hidden)
+                #print("encoder finish\t", encoder_hidden.size(),"\t",tmp.size())
                 if y[i,j] == 1: #EOS
-                    print("eos")
+                    #print("eos")
                     break
-                print("eos test pass")
-            print(encoder_hidden.view(1,-1))
+                #print("eos test pass")
+            #print(encoder_hidden.view(1,-1))
             #torch.cat((hidden_state, encoder_hidden.view(1,-1).float().cuda()),0)
             hidden_state[i] = encoder_hidden.view(1,-1)
-            print("hidden state size=",hidden_state.size())
-            print(hidden_state)
+            #print("hidden state size=",hidden_state.size())
+            #print(hidden_state)
             encoder_hidden = self.initHidden()
-        print("hidden state size=",hidden_state.size())
-        print("resnet")
-        print("x.size",x.size())
+        #print("hidden state size=",hidden_state.size())
+        #print("resnet")
+        #print("x.size",x.size())
         x = self.conv1(x)
-        print("conv1 x.size",x.size())
+        #print("conv1 x.size",x.size())
         x = self.bn1(x)
-        print("bn1 x.size",x.size())
+        #print("bn1 x.size",x.size())
         x = self.relu(x)
-        print("relu x.size",x.size())
+        #print("relu x.size",x.size())
         x = self.maxpool(x)
-        print("maxpool x.size",x.size())
+        #print("maxpool x.size",x.size())
         if TFDEM:
             spatial_temporal_feature = self.extra_layer0(x)
         hidden_state = hidden_state.view(x.size()[0],1,x.size()[2],-1)
 
         # concatenate caption feature with video feature
-        print("encoder hidden size=",hidden_state.size())
+        #print("encoder hidden size=",hidden_state.size())
         #cat = torch.zeros((x.size()[0],x.size()[1],x.size()[2],x.size()[3]+hidden_state.size()[-1]), dtype=torch.float).cuda()
         cat = hidden_state.repeat(1,64,1,1).cuda()
-        print("after cat repeat size=", cat.size())
+        #print("after cat repeat size=", cat.size())
         #cat_var = torch.autograd.Variable(cat)
         cat_var = torch.cat((x,cat),3).cuda()
         #for frame in range(x.size()[0]):
@@ -348,26 +349,29 @@ class ResNet(nn.Module):
                     #cat_var[frame, channel, w,x.size()[3]:] = hidden_state[frame, 0, w]
 
         x = torch.autograd.Variable(cat_var).cuda()
-        print("x size = ",x.size())
+        #print("x size = ",x.size())
         x = self.layer1(x)
-        print("layer1 x.size",x.size())
+        #print("layer1 x.size",x.size())
         x = self.layer2(x)
-        print("layer2 x.size",x.size())
+        #print("layer2 x.size",x.size())
         x = self.layer3(x)
-        print("layer3 x.size",x.size())
+        #print("layer3 x.size",x.size())
 
         x = self.layer4(x)
-        print("layer4 x.size",x.size())
+        #print("layer4 x.size",x.size())
 
         x = self.avgpool(x)
-        print("avgpol x.size",x.size())
+        #print("avgpol x.size",x.size())
         x = torch.flatten(x, 1)
-
-        print("*"*50)
-        print(x.size())
-        x = self.fc(x)
+        #print(x.size())
+        x = x.unsqueeze(-1)
+        #print(x.size())
+        x = self.lastconv(x)
+        #print("*"*50)
+        #print(x.size())
+        #x = self.fc(x)
         #x, hidden = self.decoder(x)
-
+        #print("fc ", x.size())
         if TFDEM:
             return x, spatial_temporal_feature
         else:

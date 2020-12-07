@@ -21,7 +21,7 @@ parser.add_argument('--k', type=int, default=3)
 parser.add_argument('--dropout', '--do', default=0.5, type=float,
                     metavar='DO', help='dropout ratio (default: 0.5)')
 parser.add_argument('--loss_type', type=str, default="nll",
-                    choices=['nll',"MSELoss"])
+                    choices=['nll',"MSELoss","BCELoss"])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
 parser.add_argument('--pretrain', type=str, default='imagenet')
@@ -82,3 +82,6 @@ parser.add_argument('--data_fuse', default = False, action = "store_true", help 
 parser.add_argument('--extra_temporal_modeling', default=False, action="store_true", help = 'subtract the feature map')
 
 parser.add_argument('--prune', type = str, default = "", choices = ["input", "output", "inout"], help='use prune for models')
+
+
+parser.add_argument('--clipnums', type = str, default = "", help='numbers of clips')

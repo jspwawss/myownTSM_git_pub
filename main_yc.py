@@ -8,7 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 
 
-from ops.dataset_slice import YouCookDataSetRcg
+from ops.dataset_slice_v2 import YouCookDataSetRcg
 from ops.models import TSN
 from ops.transforms import *
 from opts import parser
@@ -59,6 +59,9 @@ def main():
 		args.store_name += '_dense'
 	if args.non_local > 0:
 		args.store_name += '_nl'
+	if args.clipnums:
+		#pass
+		args.store_name +=  "_clip{}".format(args.clipnums)
 	if args.suffix is not None:
 		args.store_name += '_{}'.format(args.suffix)
 	print('storing name: ' + args.store_name)
@@ -69,7 +72,7 @@ def main():
 		sd = torch.load(args.tune_from)
 		sd = sd['state_dict']
 		sd = input_dim_L2distance(sd, args.shift_div)
-
+	
 	model = TSN(num_class, args.num_segments, args.modality,
 				base_model=args.arch,
 				new_length = 2 if args.data_fuse else None,
@@ -87,7 +90,8 @@ def main():
 				prune_list = [prune_conv1in_list, prune_conv1out_list],
 				is_prune = args.prune,
 				)
-
+	
+	#model = torch.load("/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e20_finetune_slice_v1_clipnum500/ckpt_"+str(1)+".pth.tar")
 	print(model)
 	#summary(model, torch.zeros((16, 24, 224, 224)))
 	#exit(1)
@@ -237,25 +241,43 @@ def main():
 		batch_size=args.batch_size, shuffle=False,
 		num_workers=args.workers, pin_memory=True)
 	'''
-	
+	#global trainDataloader, valDataloader, train_loader, val_loader
+	trainDataloader = YouCookDataSetRcg(args.root_path, args.train_list,train=True,inputsize=crop_size,hasPreprocess = False,\
+			clipnums=args.clipnums,
+			hasWordIndex = True,)
+	valDataloader = YouCookDataSetRcg(args.root_path, args.val_list,val=True,inputsize=crop_size,hasPreprocess = False,\
+			clipnums=args.clipnums,
+			hasWordIndex = True,)
+
+	#print(trainDataloader._getMode())
+	#print(valDataloader._getMode())
+	#exit()
 	train_loader = torch.utils.data.DataLoader(
-		YouCookDataSetRcg(args.root_path, args.train_list,train=True,inputsize=crop_size,hasPreprocess = False,\
-			hasWordIndex = True,),
-		shuffle=True,
+		trainDataloader,
+		#shuffle=True,
 
 
 
 	)
 	val_loader = torch.utils.data.DataLoader(
-		YouCookDataSetRcg(args.root_path, args.val_list,val=True,inputsize=crop_size,hasPreprocess = False,\
-			hasWordIndex = True,),
-
+		valDataloader
 	)
+	#print(train_loader is val_loader)
+	#print(trainDataloader._getMode())
+	#print(valDataloader._getMode())
+
+	#print(trainDataloader._getMode())
+	#print(valDataloader._getMode())
+	#print(len(train_loader))
+	#exit()
 	# define loss function (criterion) and optimizer
 	if args.loss_type == 'nll':
 		criterion = torch.nn.CrossEntropyLoss().cuda()
 	elif args.loss_type == "MSELoss":
 		criterion = torch.nn.MSELoss().cuda()
+	elif args.loss_type == "BCELoss":
+		#print("BCELoss")
+		criterion = torch.nn.BCELoss().cuda()
 	else:
 		raise ValueError("Unknown loss type")
 
@@ -276,13 +298,16 @@ def main():
 
 	for epoch in range(args.start_epoch, args.epochs):
 		adjust_learning_rate(optimizer, epoch, args.lr_type, args.lr_steps)
-		print("265")
+		#print("265")
 		# train for one epoch
 		######
+		#print(trainDataloader._getMode())
+		#print(valDataloader._getMode())
 		train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
 		######
-		print("268")
+		#print("268")
 		# evaluate on validation set
+		#model = model.load_state_dict(torch.load("/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e20_finetune_slice_v1_clipnum500/ckpt_"+str(epoch+1)+".pth.tar"))
 		if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
 			prec1 = validate(val_loader, model, criterion, epoch, log_training, tf_writer)
 
@@ -315,6 +340,11 @@ def main():
 		print("test pass")
 
 def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
+	#global trainDataloader, valDataloader
+
+	#print(len(train_loader))
+	#print(trainDataloader._getMode())
+	#print(valDataloader._getMode())
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
 	losses = AverageMeter()
@@ -325,100 +355,134 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	#top1_extra = AverageMeter()
 	#top5_extra = AverageMeter()
 
-	if args.no_partialbn:
-		model.module.partialBN(False)
-	else:
-		model.module.partialBN(True)
+	#if args.no_partialbn:
+	#	model.module.partialBN(False)
+	#else:
+	#	model.module.partialBN(True)
 
 	# switch to train mode
 	model.train()
 	#print("308")
 	end = time.time()
-	for i, data in enumerate(train_loader):
-		print("data fetch finish ")
+	#print("in train")
+	for idx, data in enumerate(train_loader):
+		
+		#print("data fetch finish ",i)
+		
 
-		print(data)
-
-		if isinstance(data, bool):
+		#print(data)
+		#if isinstance(data, bool): #img DNE
+	#		continue
+		if not data:
 			continue
-
 		data_time.update(time.time() - end)
 
+
+		#print(data[0])
+		#print(data[1])
+		[URL, id, sift, label, clips] = data	
+
+
 		
-		[URL, id, label, clips] = data	
-		input_video=torch.tensor([],dtype=torch.float).cuda()
-		input_caption=torch.tensor([],dtype=torch.long).cuda()
 		#cap_nums = []
-		for clip in clips:
-			video = clip[0]
-			caption = clip[1]
-			input_video = torch.cat((input_video, video.float().cuda()),1)
-			input_caption = torch.cat((input_caption, caption.long().cuda()),0)
-			#cap_nums.append(clip[2])
-		
-		print(input_video.size())
-		print(input_caption.size())
+		#print("sift=",sift)
+		for i, s in enumerate(sift):
+			input_video=torch.tensor([],dtype=torch.float).cuda()
+			input_caption=torch.tensor([],dtype=torch.long).cuda()
+			#print("i={},s={},lensift={},idx={},epoch={}".format(i, s, len(sift), idx, epoch))
+			if i+1 < len(sift):
+				#print(sift[i+1])
+				#print(s)
+				#print(int(sift[i+1])-int(s))
+				if int(sift[i+1])-int(s) < 50:
+					for clip in range(s,sift[i+1]):
+						video = clips[clip][0]
+						caption = clips[clip][1]
+						input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+						#print(input_video.size())
+						input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+						#print(input_caption.size())
+						#print(sift[i+1])
+						#print(s)
+						#print(label[0,s: sift[i+1]])
+						target = label[0,s: sift[i+1]].cuda()
+				else:
+					for clip in range(s,sift[i+1],(int(sift[i+1])-int(s))//50):
+						#print("clip={},s={},sift[i+1]={}".format(clip, s, sift[i+1]))
+						if (clip - s)/((int(sift[i+1])-int(s))//50) >= 50:
+							break
+						video = clips[clip][0]
+						caption = clips[clip][1]
+						input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+						input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+						target = label[0,s: sift[i+1]: ((int(sift[i+1])-int(s)) //50)].cuda()
+						target = target[:50].cuda()
+			else:
+				length = len(clips)
+				if int(length)- int(s) < 50:
+					for clip in range(s,length):
+						video = clips[clip][0]
+						caption = clips[clip][1]
+						input_video = torch.cat((input_video.float().cuda(),video.float().cuda()),1)
+						input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+						target = label[0,s: length].cuda()
+				else:
+					for clip in range(s,length,(int(length)-int(s))//50):
+						if (clip - s)/((int(length)-int(s))//50) >= 50:
+							break
+						video = clips[clip][0]
+						caption = clips[clip][1]
+						input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+						input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+						target = label[0,s: length: (length-s) //50].cuda()
+						target = target[:50]
+				'''
+				video = clips[-1][0]
+				caption = clips[-1][1]
+				input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+				input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+				target = label[0,-1].cuda()
+				'''
+			input_video = input_video.view(1,-1,3,crop_size,crop_size)
+			#input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
+			input_caption = input_caption.view(1,-1,64,1)
+			#print("target=",target.size())
+			input_video_var = torch.autograd.Variable(input_video)
+			input_caption_var = torch.autograd.Variable(input_caption)
+			target_var = torch.autograd.Variable(target)
 
-		input_video = input_video.view(1,-1,3,crop_size,crop_size)
-		input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
-		print(input_video.size())
-		print(input_caption.size())
+			# compute output
+			wExtraLoss = 1 if args.prune == '' else 0.1
+			output = model(input_video_var, input_caption_var)
+			#print("outputsize=",output.size())
+			#print("target_var=",target_var.size())
+			#print("target=",target.size())
+			loss_main = criterion(output.squeeze(), target_var.squeeze())
 
-		target = label.cuda()
-		input_video_var = torch.autograd.Variable(input_video)
-		input_caption_var = torch.autograd.Variable(input_caption)
-		target_var = torch.autograd.Variable(target)
+			loss = loss_main
 
-		# compute output
-		wExtraLoss = 1 if args.prune == '' else 0.1
-		output = model(input_video_var, input_caption_var)
-		print("output size=",output.size())
-		print("target)var=",target_var.size())
-		print(output)
-		print(target_var)
-		#print("label size=",label.size())
-		loss_main = criterion(output, target_var)
-		#loss_main = 0
-		#lloss = torch.sub(output, target_var).squeeze()
-		#for l in lloss:
-		#	loss_main += l**2
-		#extra_loss = criterion(extra, target_var)*wExtraLoss
-		#loss = loss_main + extra_loss
-		loss = loss_main
-		print("loss=",loss)
-		losses.update(loss_main.item(), )
-		'''
-		# measure accuracy and record loss
-		prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-		losses.update(loss_main.item(), input.size(0))
-		top1.update(prec1.item(), input.size(0))
-		top5.update(prec5.item(), input.size(0))
-		'''
-		auc = AUC(output.data, target[0])
-		print("auc=",auc)
-		AUCs.update(auc)
-		print("after AUCs update")
-		'''
-		prec1_extra, prec5_extra = accuracy(extra.data, target, topk=(1, 5))
-		losses_extra.update(extra_loss.item(), input.size(0))
-		top1_extra.update(prec1_extra.item(), input.size(0))
-		top5_extra.update(prec5_extra.item(), input.size(0))
-		'''
-		# compute gradient and do SGD step
-		st = time.time()
-		loss.backward()
-		print("{0:*^50}".format("after backward\t"+str(time.time()-st)))
-		if args.clip_gradient is not None:
-			total_norm = clip_grad_norm_(model.parameters(), args.clip_gradient)
-		st = time.time()
-		optimizer.step()
-		print("{0:*^50}".format("after step\t"+str(time.time()-st)))
-		st = time.time()
-		optimizer.zero_grad()
-		print("{0:*^50}".format("after zero_grad\t"+str(time.time()-st)))
-		# measure elapsed time
-		batch_time.update(time.time() - end)
-		end = time.time()
+			losses.update(loss_main.item(), )
+
+			auc = AUC(output.squeeze(), target_var.squeeze())
+			#print("auc=",auc)
+			AUCs.update(auc)
+			#print("after AUCs update")
+
+			# compute gradient and do SGD step
+			st = time.time()
+			loss.backward()
+			#print("{0:*^50}".format("after backward\t"+str(time.time()-st)))
+			if args.clip_gradient is not None:
+				total_norm = clip_grad_norm_(model.parameters(), args.clip_gradient)
+			st = time.time()
+			optimizer.step()
+			#print("{0:*^50}".format("after step\t"+str(time.time()-st)))
+			st = time.time()
+			optimizer.zero_grad()
+			#print("{0:*^50}".format("after zero_grad\t"+str(time.time()-st)))
+			# measure elapsed time
+			batch_time.update(time.time() - end)
+			end = time.time()
 		'''
 		if i % args.print_freq == 0:
 			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
@@ -433,19 +497,19 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 			log.write(output + '\n')
 			log.flush()
 		'''
-		if i % args.print_freq == 0:
-			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
+		if idx % args.print_freq == 0:
+			txtoutput = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
 					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-					  
+					  "output/target\t{output}/\t{target}\t"
 					  'auc {auc.val:.4f} ({auc.avg:.3f})\t'
 					  .format(
-				epoch, i, len(train_loader), batch_time=batch_time,
+				epoch, idx, len(train_loader), batch_time=batch_time,output=output, target=target,
 				data_time=data_time, loss=losses,  auc=AUCs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
-			print(output)
-			log.write(output + '\n')
+			print(txtoutput)
+			log.write(txtoutput + '\n')
 			log.flush()
-		#print("**"*50)
+		print("**"*50)
 		#break
 		#exit()
 
@@ -464,90 +528,154 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
 	# switch to evaluate mode
 	model.eval()
-
+	
 	end = time.time()
 	with torch.no_grad():
 		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
 			txt.write("epoch\t"+str(epoch)+"\n")
-		for i, data in enumerate(val_loader):
+		for idx, data in enumerate(val_loader):
+			totalOutput = torch.tensor([],dtype=torch.float).cuda()
+			totalTarget = torch.tensor([],dtype=torch.float).cuda()
 			data_time.update(time.time() - end)
-			if isinstance(data, bool):
+	#		if isinstance(data, bool):
+		#		continue
+			#if not torch.any(data):
+	#			continue
+			if not data:
 				continue
-			
-			[URL, id, label, clips] = data	
-			input_video=torch.tensor([],dtype=torch.float).cuda()
-			input_caption=torch.tensor([],dtype=torch.long).cuda()
+			try:
+				[URL, id, sift, label, clips] = data	
+			except Exception as e:
+				print(e)
+				print(data)
+				with open("errr.txt","a+") as txt:
+					txt.write(str(data))
+
 			#cap_nums = []
-			for clip in clips:
-				video = clip[0]
-				caption = clip[1]
-				input_video = torch.cat((input_video, video.float().cuda()),1)
-				input_caption = torch.cat((input_caption, caption.long().cuda()),0)
-				#cap_nums.append(clip[2])			#for recording filename in result
+			for i, s in enumerate(sift):
+				input_video=torch.tensor([],dtype=torch.float).cuda()
+				input_caption=torch.tensor([],dtype=torch.long).cuda()
+				#print("i={},s={}".format(i,s))
+				if i+1 < len(sift):
+					if int(sift[i+1])-int(s) < 50:
+						#print( int(sift[i+1])-int(s))
+						for clip in range(s,sift[i+1]):
+							#print(clip)
+							video = clips[clip][0]
+							caption = clips[clip][1]
+							input_video = torch.cat((input_video.float().cuda(),video.float().cuda()),1)
+							input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+							target = label[0,s: sift[i+1]].cuda()
+					else:
+						for clip in range(s,sift[i+1],(int(sift[i+1])-int(s))//50):
+							#print(clip)
+							if (clip - s)/((int(sift[i+1])-int(s))//50) >= 50:
+								break
+							video = clips[clip][0]
+							caption = clips[clip][1]
+							input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+							input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+							target = label[0,s: sift[i+1]: (sift[i+1]-s) //50].cuda()
+							target = target[:50]
+				else:
+					length = len(clips)
+					if int(length)- int(s) < 50:
+						for clip in range(s,length):
+							video = clips[clip][0]
+							caption = clips[clip][1]
+							input_video = torch.cat((input_video.float().cuda(),video.float().cuda()),1)
+							input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+							target = label[0,s: length].cuda()
+					else:
+						for clip in range(s,length,(int(length)-int(s))//50):
+							if (clip - s)/((int(length)-int(s))//50) >= 50:
+								break
+							video = clips[clip][0]
+							caption = clips[clip][1]
+							input_video = torch.cat((input_video.float().cuda(), video.float().cuda()),1)
+							input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+							target = label[0,s:length: (length-s) //50].cuda()
+							target = target[:50]
+				#print("input video.size()",input_video.size())
+				#print("input_caption.size()",input_caption.size())
 
-			input_video = input_video.view(1,-1,3,crop_size,crop_size)
-			input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
-			print(input_video.size())
-			print(input_caption.size())
-
-			target = label.cuda()
-			input_video_var = torch.autograd.Variable(input_video)
-			input_caption_var = torch.autograd.Variable(input_caption)
-			target_var = torch.autograd.Variable(target)
-
-			# compute output
-			wExtraLoss = 1 if args.prune == '' else 0.1
-			output = model(input_video_var, input_caption_var)
-			print("output size=",output.size())
-			print("target)var=",target_var.size())
-			print(output)
-			print(target_var)
+				input_video = input_video.view(1,-1,3,crop_size,crop_size)
+				#input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
+				input_caption = input_caption.view(1,-1,64,1)
 
 
-			loss = criterion(output, target)
 
-			auc = AUC(output.data, target[0])
-			print("auc=",auc)
+				input_video_var = torch.autograd.Variable(input_video)
+				input_caption_var = torch.autograd.Variable(input_caption)
+				target_var = torch.autograd.Variable(target)
+				#print("input_video_var.size()",input_video_var.size())
+				#print("target size",target.size())
+				# compute output
+				wExtraLoss = 1 if args.prune == '' else 0.1
+				output = model(input_video_var, input_caption_var)
+				#print("output size=",output.size())
+				#print("target)var=",target_var.size())
+				#print(output)
+				#print(target_var)
+				#print("totalOutput size=",totalOutput.size())
+				#print("output size=",output.size())
+				#print("squeeze size=",output.squeeze().size())
+				#print(totalOutput)
+				#print("/*"*50)
+				#print(output)
+				totalOutput = torch.cat((totalOutput.float().cuda(),output.float().cuda()),dim=1)
+				#print("totalTarget size()",totalTarget.size())
+				#print("target_Var.size()",target_var.size())
+				#print("target size",target.size())
+				#print(target_var)
+				if len(target_var.size()) != 0:
+					totalTarget = torch.cat((totalTarget.float().cuda(),target_var.float().cuda()),dim=0)
+				loss = criterion(output.squeeze(), target.squeeze())
+				#print("loss = ",loss)
+				#auc = AUC(output.squeeze(), target_var.squeeze())
+				#print("auc=",auc)
 
-			AUCs.update(auc)
+				#AUCs.update(auc)
 
-			losses.update(loss.item(), )
+				losses.update(loss.item(), )
 
 
 			# measure elapsed time
 			batch_time.update(time.time() - end)
 			end = time.time()
-			output = ('Test: [{0}/{1}]\t'
+			auc = AUC(totalOutput.squeeze(), totalTarget.squeeze())
+			AUCs.update(auc)
+			txtoutput = ('Test: [{0}/{1}]\t'
 						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						
+						"output\target\t{output}\t{target}"		
 						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
-				i, len(val_loader), batch_time=batch_time, loss=losses,
+				idx, len(val_loader), batch_time=batch_time, loss=losses,output=output, target=target,
 					top5=AUCs))	
-			if i % args.print_freq == 0:
-				output = ('Test: [{0}/{1}]\t'
-						  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-						  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						  
-						  'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
-					i, len(val_loader), batch_time=batch_time, loss=losses,
-					 top5=AUCs))
-				print(output)
+			if idx % args.print_freq == 0:
+				#output = ('Test: [{0}/{1}]\t'
+				#		  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+				#		  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+				#		  "output/target {output}/{target}"
+				#		  'AUC {aucs.val:.3f} ({aucs.avg:.3f})'.format(
+				#	i, len(val_loader), batch_time=batch_time, loss=losses,output=output,target=target,
+				#	 aucs=AUCs))
+				print(txtoutput)
 				if log is not None:
-					log.write(output + '\n')
+					log.write(txtoutput + '\n')
 					log.flush()
 
 
 			with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
-				txt.write(output+"\n")
+				txt.write(txtoutput+"\n")
 
 			#break
 
-		output = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
+		txtoutput = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
 			  	.format(auc=AUCs, loss=losses))
-	print(output)
+	print(txtoutput)
 	if log is not None:
-		log.write(output + '\n')
+		log.write(txtoutput + '\n')
 		log.flush()
 
 	if tf_writer is not None:

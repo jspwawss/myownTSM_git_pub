@@ -2,11 +2,12 @@
 #CUDA_LAUNCH_BLOCKING=1  
 python3 main_yc.py youcook RGB \
 	--arch resnet50 --num_segments 8 \
-	--gd 20 --lr 0.00025 --lr_steps 7 15 --epochs 2 \
+	--gd 20 --lr 0.00025 --lr_steps 7 15 --epochs 10 \
+	--resume=/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e10_finetune_clip500_slice_v3/ckpt_5.pth.tar \
 	--batch-size 16 -j 16 --dropout 0.7 --consensus_type=conv1d --eval-freq=1 \
 	--shift --shift_div=8 --shift_place=blockres --concat=All  \
 	--tune_from=/home/ubuntu/backup_kevin/myownTSM_git/pretrained/TSM_kinetics_RGB_resnet50_shift8_blockres_avg_segment8_e50.pth \
-	--suffix=slice_v1 --loss_type=MSELoss
+	--suffix=slice_v3 --loss_type=BCELoss --clipnums=500
 	2>err.log
 
 #MSTSM+TFDEM+prune

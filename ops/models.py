@@ -46,7 +46,8 @@ class TSN(nn.Module):
         self.is_prune = is_prune
         self.prune_list = prune_list
         
-
+        #self.activate = nn.Tanh()      #if use cross entropy, output value can't be nagative //log DNE
+        self.activate = nn.Sigmoid()
 
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
@@ -385,70 +386,73 @@ class TSN(nn.Module):
         pass
 
     def forward(self, input, input_caption, no_reshape=False):
-        print("in model forward")
-        print("input size=",input.size())
-        print(input_caption)
-        print("-"*50)
+        #print("in model forward")
+        #print("input size=",input.size())
+        #print(input_caption)
+        #print("-"*50)
 
         if not no_reshape:
             if self.modality == "RGB":
-                print("models 357")
+                #print("models 357")
                 sample_len = (3 * self.new_length) if self.new_length == 1 else 4
             elif self.modality == "Depth":
-                print("models 360")
+                #print("models 360")
                 sample_len = 1 * self.new_length
             elif self.modality == "Flow":
-                print("models 363")
+                #print("models 363")
                 sample_len = 2 * self.new_length
             #sample_len = (3 if self.modality in ["RGB", "Depth"] else 2) * self.new_length
             elif self.modality == 'RGBDiff':
-                print("models 367")
+                #print("models 367")
                 sample_len = 3 * self.new_length
                 input = self._get_diff(input)
 
             if self.extra_temporal_modeling:
-                print("models 371")
+                #print("models 371")
 
                 base_out, spatial_feature = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))   # base_out -> (Batch_size * segment, 2048)
 
                 #print("base_out size",base_out.size())
                 #print("spatial_freature=",spatial_feature.size())
             else:
-                print("models 375")
-                print("input size",input.size())
+                #print("models 375")
+                #print("input size",input.size())
                 #print(input.view((-1, sample_len) + input.size()[-2:]))
-                print((-1, sample_len) + input.size()[-2:])
+                #print((-1, sample_len) + input.size()[-2:])
                 
                 base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]),input_caption.view(-1, input_caption.size()[2],1))
-                print("base out size",base_out.size())
+                #print("base out size",base_out.size())
+                base_out = base_out.squeeze()
+                #print(base_out)
             
         else:
-            print("models 379")
+            #print("models 379")
             base_out = self.base_model(input, input_caption)
-            print("base out size",base_out.size())
+            #print("base out size",base_out.size())
         if self.dropout > 0 and 'efficientnet' not in self.base_model_name:
-            print("models 383")
-            base_out = self.new_fc(base_out)
-            print("base out size",base_out.size())
+            pass
+            #print("models 383")
+            #base_out = self.new_fc(base_out)
+            #print("base out size",base_out.size())
 
         if not self.before_softmax:
-            print("models 387")
+            #print("models 387")
             base_out = self.softmax(base_out)
         
         output = 0
         if self.reshape:
-            print("models 392")
+            #print("models 392")
             if self.is_shift and self.temporal_pool:
-                print("models 394")
+                #print("models 394")
                 base_out = base_out.view((-1, self.num_segments // 2) + base_out.size()[1:])
                 output = self.consensus(base_out)
 
                 if self.extra_temporal_modeling != "":
-                    print("models 399")
+                    #print("models 399")
                     return output.squeeze(1) + spatial_feature
 
             elif self.extra_temporal_modeling:
-                print("models 403")
+                #print("models 403")
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
                 spatial_feature = spatial_feature.view((-1, self.num_segments) + spatial_feature.size()[1:])
 
@@ -459,23 +463,23 @@ class TSN(nn.Module):
                 return output.squeeze(1), spatial_feature.squeeze(1)
             else:
                 #print(base_out)
-
-                output = nn.Softmax(dim=0)(base_out)
+       
+                output = self.activate(base_out)
                 #print(output)
                 #print("outputsize-----",output.size())
-                return output.squeeze(1).unsqueeze(0)
+                return output.view(1,-1)
                 #return base_out.squeeze(1).unsqueeze(0)
                 #return base_out.squeeze(1)
-                print("models 413")
-                print("base_out size=",base_out.size())
+                #print("models 413")
+                #print("base_out size=",base_out.size())
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])     #(batch_size, num_segment, class_num)
-                print("base_out size=",base_out.size())
+                #print("base_out size=",base_out.size())
                 base_out = base_out.view((-1) + base_out.size()[1:])
-                print("base_out size=",base_out.size())
+                #print("base_out size=",base_out.size())
                 output = self.consensus(base_out)
-                print("output size", output.size())
-            print("models 416")
-            print("outputsize+++++",output.size())
+                #print("output size", output.size())
+            #print("models 416")
+            #print("outputsize+++++",output.size())
             #return output.squeeze(1)
             return output.unsqueeze(0)
 

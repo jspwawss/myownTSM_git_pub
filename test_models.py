@@ -2,11 +2,12 @@
 
 import argparse
 import time
+import os
 
 import torch.nn.parallel
 import torch.optim
 from sklearn.metrics import confusion_matrix
-from ops.dataset import TSNDataSet
+from ops.dataset_slice_v1 import YouCookDataSetRcg
 from ops.models import TSN
 from ops.transforms import *
 from ops import dataset_config
@@ -46,7 +47,16 @@ parser.add_argument('--gpus', nargs='+', type=int, default=None)
 parser.add_argument('--img_feature_dim',type=int, default=256)
 parser.add_argument('--num_set_segments',type=int, default=1,help='TODO: select multiply set of n-frames from a video')
 parser.add_argument('--pretrain', type=str, default='imagenet')
+parser.add_argument('--clipnums', type = str, default = "", help='numbers of clips')
+parser.add_argument('--epoch', type = str, default = "", help='numbers of clips')
+parser.add_argument('--data_fuse', default = False, action = "store_true", help = 'concatenate skeleton to depth')
 
+parser.add_argument('--shift', default=False, action="store_true", help='use shift for models')
+parser.add_argument('--shift_div', default=8, type=int, help='number of div for shift (default: 8)')
+parser.add_argument('--shift_place', default='blockres', type=str, help='place for shift (default: stageres)')
+parser.add_argument('--concat', type = str, default = "", choices = ['All', 'First'], help = 'use concatenation after shifting')
+parser.add_argument('--print-freq', '-p', default=20, type=int,
+                    metavar='N', help='print frequency (default: 10)')
 args = parser.parse_args()
 
 
@@ -67,7 +77,30 @@ class AverageMeter(object):
 		self.count += n
 		self.avg = self.sum / self.count
 
+def AUC(output, target):
+    #print("output is ",output)
+    #print("target is ",target)
+    #>0.8 => True   || 0.8 is my threshold
+    #output_cpu=output.cpu()
+    #target_cpu = target.cpu()
+    #output = target
+    
+    pred = torch.where(output>0.8,torch.ones(output.size()).cuda(),torch.zeros(output.size()).cuda()).cuda()
+    #pred[0] = 1
+    #print(pred)
 
+    tp = torch.eq(pred,target).cuda()
+    #print("tp=",tp)
+    acc = torch.sum(tp)
+    accdata = acc.float()
+    #print("intersection=",accdata)
+    #print(output.size()[0])
+    #rint(target.size()[1])
+    a = output.size()[0]+target.size()[0]-accdata
+    #print("area =",a)
+    auc = float(acc.data/a.data)
+    #print("auc in auc is ",auc)
+    return auc
 def accuracy(output, target, topk=(1,)):
 	"""Computes the precision@k for the specified values of k"""
 	maxk = max(topk)
@@ -166,13 +199,15 @@ net_list = []
 modality_list = []
 
 total_num = None
-print("weights_list=",weights_list)
-print("test_segments_list=",test_segments_list)
-print("test_file_list=",test_file_list)
+#print("weights_list=",weights_list)
+#print("test_segments_list=",test_segments_list)
+#print("test_file_list=",test_file_list)
 #exit()
 
 for this_weights, this_test_segments, test_file in zip(weights_list, test_segments_list, test_file_list):
+	#print("ayaya")
 	is_shift, shift_div, shift_place = parse_shift_option_from_log_name(this_weights)
+	print("is shift={is_shift}, shift_div={shift_div}, shift_place={shift_place}".format(is_shift=is_shift, shift_div = shift_div, shift_place = shift_place))
 	if 'RGB' in this_weights:
 		modality = 'RGB'
 	elif 'Depth' in this_weights:
@@ -189,6 +224,8 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 
 	if 'extra' in this_weights:
 		extra_temporal_modeling = True
+	else:
+		extra_temporal_modeling = False
 
 	if 'conv1d' in this_weights:
 		args.crop_fusion_type = "conv1d"
@@ -196,12 +233,13 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 		args.crop_fusion_type = "avg"
 
 	if 'prune' in this_weights:
+		print("prune in this weights")
 		args.prune = 'inout'
 		args.tune_from = r'/home/ubuntu/backup_kevin/myownTSM/checkpoint/TSM_ucf101_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e35_extra_finetune_MSTSM_TFDEM_split3/ckpt.best.pth.tar'
 		#args.tune_from = '/home/share/UCF101/Saved_Models/TSM_ucf101_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e35_extraLSTM_finetune_MSTSM_TFDEM_split2/ckpt.best.pth.tar'
 	else:
 		args.prune = ''
-
+	#print("args.prune={}".format(args.prune))
 	if args.prune in ['input', 'inout'] and args.tune_from:
 		sd = torch.load(args.tune_from)
 		sd = sd['state_dict']
@@ -211,14 +249,16 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 		new_length = 2 if "fuse" in this_weights else 1
 	else:
 		new_length = 5
-	
-	this_arch = this_weights.split('TSM_')[1].split('_')[2]
+	print("this weight\n",this_weights)
+	this_arch = this_weights.split('TSM_')[2].split('_')[2]
 	modality_list.append(modality)
-	num_class, args.train_list, val_list, root_path, prefix = dataset_config.return_dataset(args.dataset,
-																							modality)
-	#print("num_class, args.train_list, val_list, root_path, prefix ={}\n{}\n{}\n{}\n{}".format(num_class, args.train_list, val_list, root_path, prefix ))																					
+	num_class, args.train_list, val_list, root_path, prefix = dataset_config.return_dataset(args.dataset,modality)
+	
+	num_class = 1																					
+	print("num_class, args.train_list, val_list, root_path, prefix ={}\n{}\n{}\n{}\n{}".format(num_class, args.train_list, val_list, root_path, prefix ))																					
 	print('=> shift: {}, shift_div: {}, shift_place: {}'.format(is_shift, shift_div, shift_place))
 	#exit()
+	'''
 	net = TSN(num_class, this_test_segments if is_shift else 1, modality,
 			  base_model=this_arch, new_length = new_length,
 			  consensus_type=args.crop_fusion_type,
@@ -231,25 +271,31 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 			  prune_list = [prune_conv1in_list, prune_conv1out_list],
 			  is_prune = args.prune,
 			  )
-	#print(net)
+	'''
+	net = TSN(num_class, this_test_segments if is_shift else 1, modality,
+			base_model=this_arch,
+			new_length = 2 if args.data_fuse else None,
+			consensus_type=args.crop_fusion_type,
+			#dropout=args.dropout,
+			img_feature_dim=args.img_feature_dim,
+			#partial_bn=not args.no_partialbn,
+			pretrain=args.pretrain,
+			is_shift=args.shift, shift_div=args.shift_div, shift_place=args.shift_place,
+			#fc_lr5=not (args.tune_from and args.dataset in args.tune_from),
+			#temporal_pool=args.temporal_pool,
+			non_local='_nl' in this_weights,
+			concat = concat,
+			extra_temporal_modeling = extra_temporal_modeling,
+			prune_list = [prune_conv1in_list, prune_conv1out_list],
+			is_prune = args.prune,
+			)
+	print(net)
+	#print(args.shift)
 	#exit()
 	if 'tpool' in this_weights:
 		from ops.temporal_shift import make_temporal_pool
 		make_temporal_pool(net.base_model, this_test_segments)  # since DataParallel
 
-	checkpoint = torch.load(this_weights)
-	checkpoint = checkpoint['state_dict']
-
-	# base_dict = {('base_model.' + k).replace('base_model.fc', 'new_fc'): v for k, v in list(checkpoint.items())}
-	base_dict = {'.'.join(k.split('.')[1:]): v for k, v in list(checkpoint.items())}
-	replace_dict = {'base_model.classifier.weight': 'new_fc.weight',
-					'base_model.classifier.bias': 'new_fc.bias',
-					}
-	for k, v in replace_dict.items():
-		if k in base_dict:
-			base_dict[v] = base_dict.pop(k)
-
-	net.load_state_dict(base_dict)
 
 	input_size = net.scale_size if args.full_res else net.input_size
 	if args.test_crops == 1:
@@ -278,21 +324,9 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 	#print("*"*50)
 	#exit()
 	data_loader = torch.utils.data.DataLoader(
-			TSNDataSet(root_path, test_file if test_file is not None else val_list, num_segments=this_test_segments,
-					   new_length=1 if modality in ["RGB", "Depth"] else 5,
-					   modality=modality,
-					   image_tmpl=prefix,
-					   test_mode=True,
-					   remove_missing=len(weights_list) == 1,
-					   transform=torchvision.transforms.Compose([
-						   cropping,
-						   Stack(roll=(this_arch in ['BNInception', 'InceptionV3'])),
-						   ToTorchFormatTensor(div=(this_arch not in ['BNInception', 'InceptionV3'])),
-						   GroupNormalize(net.input_mean, net.input_std),
-					   ]), dense_sample=args.dense_sample, twice_sample=args.twice_sample, wholeFrame=args.wholeFrame,\
-					   data_fuse = True if "fuse" in this_weights else False),
-			batch_size=args.batch_size, shuffle=False,
-			num_workers=args.workers, pin_memory=True,
+			YouCookDataSetRcg(root_path, val_list,val=True,inputsize=input_size,hasPreprocess = False,\
+			clipnums=args.clipnums,
+			hasWordIndex = True,)
 	)
 
 	if args.gpus is not None:
@@ -313,12 +347,199 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 	data_iter_list.append(data_gen)
 	net_list.append(net)
 #print(net_list)
-#print("*"*50)
+print("*"*50)
 #print(len(net_list))
 #exit()
+
+
+def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
+	batch_time = AverageMeter()
+	data_time = AverageMeter()
+	losses = AverageMeter()
+	AUCs = AverageMeter()
+
+	# switch to evaluate mode
+	model.eval()
+
+	end = time.time()
+	with torch.no_grad():
+		with open( "valtest2.txt", "a+") as txt:
+			txt.write("epoch\t"+str(epoch)+"\n")
+		for i, data in enumerate(val_loader):
+			data_time.update(time.time() - end)
+	#		if isinstance(data, bool):
+		#		continue
+			#if not torch.any(data):
+	#			continue
+			if not data:
+				continue
+			try:
+				[URL, id, label, clips] = data	
+			except Exception as e:
+				print(e)
+				print(data)
+				with open("errr.txt","a+") as txt:
+					txt.write(str(data))
+			input_video=torch.tensor([],dtype=torch.float).cuda()
+			input_caption=torch.tensor([],dtype=torch.long).cuda()
+			#cap_nums = []
+			for clip in clips:
+				video = clip[0]
+				caption = clip[1]
+				input_video = torch.cat((input_video, video.float().cuda()),1)
+				input_caption = torch.cat((input_caption, caption.long().cuda()),0)
+				#cap_nums.append(clip[2])			#for recording filename in result
+
+			input_video = input_video.view(1,-1,3,input_size,input_size)
+			input_caption = input_caption.view(1,-1,input_caption.size()[-1],1)
+			#print(input_video.size())
+			#print(input_caption.size())
+
+			target = label.cuda()
+			input_video_var = torch.autograd.Variable(input_video)
+			input_caption_var = torch.autograd.Variable(input_caption)
+			target_var = torch.autograd.Variable(target)
+
+			# compute output
+			wExtraLoss = 1 if args.prune == '' else 0.1
+			output = model(input_video_var, input_caption_var)
+			#print("output size=",output.size())
+			#print("target)var=",target_var.size())
+			#print(output)
+			#print(target_var)
+
+
+			loss = criterion(output, target)
+
+			auc = AUC(output.squeeze(), target_var.squeeze())
+			#print("auc=",auc)
+
+			AUCs.update(auc)
+
+			losses.update(loss.item(), )
+
+
+			# measure elapsed time
+			batch_time.update(time.time() - end)
+			end = time.time()
+			txtoutput = ('Test: [{0}/{1}]\t'
+						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+						"output\target\t{output}\t{target}"		
+						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
+				i, len(val_loader), batch_time=batch_time, loss=losses,output=output, target=target,
+					top5=AUCs))	
+			if i % args.print_freq == 0:
+				#output = ('Test: [{0}/{1}]\t'
+				#		  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+				#		  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+				#		  "output/target {output}/{target}"
+				#		  'AUC {aucs.val:.3f} ({aucs.avg:.3f})'.format(
+				#	i, len(val_loader), batch_time=batch_time, loss=losses,output=output,target=target,
+				#	 aucs=AUCs))
+				print(output)
+				if log is not None:
+					log.write(txtoutput + '\n')
+					log.flush()
+
+
+			with open("valtest2.txt", "a+") as txt:
+				txt.write(txtoutput+"\n")
+
+			#break
+
+		txttoutput = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
+			  	.format(auc=AUCs, loss=losses))
+		with open("valtest2.txt", "a+") as txt:
+			txt.write(txtoutput+"\n")
+	print(output)
+	if log is not None:
+		log.write(txtoutput + '\n')
+		log.flush()
+
+	if tf_writer is not None:
+		tf_writer.add_scalar('loss/test', losses.avg, epoch)
+		#tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
+		#tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
+		tf_writer.add_scalar('auc/test', AUCs.avg, epoch)
+	return AUCs.avg
+
+criterion = torch.nn.BCELoss()
+best_prec1 = 0
+for epoch in range(int(args.epoch)):
+	print(this_weights.format(str(epoch+1)))
+	checkpoint = torch.load(this_weights.format(str(epoch+1)))
+	checkpoint = checkpoint['state_dict']
+	#for key, value in checkpoint.items():
+	#	print(key)
+	
+	
+	#print(checkpoint)
+	
+	netdict = [ "module.base_model.layer1.0.conv1.weight", "module.base_model.layer1.1.conv1.weight", "module.base_model.layer1.2.conv1.weight", \
+		"module.base_model.layer2.0.conv1.weight", "module.base_model.layer2.1.conv1.weight", "module.base_model.layer2.2.conv1.weight",\
+			 "module.base_model.layer2.3.conv1.weight", "module.base_model.layer3.0.conv1.weight", "module.base_model.layer3.1.conv1.weight", \
+				 "module.base_model.layer3.2.conv1.weight", "module.base_model.layer3.3.conv1.weight", "module.base_model.layer3.4.conv1.weight", \
+					 "module.base_model.layer3.5.conv1.weight", "module.base_model.layer4.0.conv1.weight", "module.base_model.layer4.1.conv1.weight", \
+						 "module.base_model.layer4.2.conv1.weight"]
+	storedict = [ "module.base_model.layer1.0.conv1.net.weight", "module.base_model.layer1.1.conv1.net.weight", "module.base_model.layer1.2.conv1.net.weight", \
+		"module.base_model.layer2.0.conv1.net.weight", "module.base_model.layer2.1.conv1.net.weight", "module.base_model.layer2.2.conv1.net.weight", \
+			"module.base_model.layer2.3.conv1.net.weight", "module.base_model.layer3.0.conv1.net.weight", "module.base_model.layer3.1.conv1.net.weight",\
+				 "module.base_model.layer3.2.conv1.net.weight", "module.base_model.layer3.3.conv1.net.weight", "module.base_model.layer3.4.conv1.net.weight", \
+					 "module.base_model.layer3.5.conv1.net.weight", "module.base_model.layer4.0.conv1.net.weight", "module.base_model.layer4.1.conv1.net.weight",\
+						  "module.base_model.layer4.2.conv1.net.weight"]
+	#replace_dict = dict(n,s) for n,s in zip(netdict,storedict)
+	# base_dict = {('base_model.' + k).replace('base_model.fc', 'new_fc'): v for k, v in list(checkpoint.items())}
+	##base_dict = {'.'.join(k.split('.')[1:]): v for k, v in list(checkpoint.items())}
+	#replace_dict = {'base_model.classifier.weight': 'new_fc.weight',
+	#				'base_model.classifier.bias': 'new_fc.bias',
+	#				}
+	#for k, v in replace_dict.items():
+	#	if k in base_dict:
+	#		base_dict[v] = base_dict.pop(k)
+	#for n,s in zip(netdict, storedict):
+		
+		#print(checkpoint)
+	#	checkpoint[n] = checkpoint.pop(s)
+	
+	
+	net.load_state_dict(checkpoint)
+	net = net.cuda()
+	print("{0:*^50}".format("checkpoint"))
+	##net.load_state_dict(base_dict)
+	#print("265")
+	# train for one epoch
+	######
+	#print(trainDataloader._getMode())
+	#print(valDataloader._getMode())
+
+	######
+	#print("268")
+	# evaluate on validation set
+	#model = model.load_state_dict(torch.load("/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e20_finetune_slice_v1_clipnum500/ckpt_"+str(epoch+1)+".pth.tar"))
+	
+	prec1 = validate(data_loader, net, criterion, epoch)
+
+	# remember best prec@1 and save checkpoint
+	is_best = prec1 > best_prec1
+	best_prec1 = max(prec1, best_prec1)
+	#tf_writer.add_scalar('acc/test_top1_best', best_prec1, epoch)
+
+	output_best = 'Best Prec@1: %.3f\n' % (best_prec1)
+	#print(output_best)
+	#log_training.write(output_best + '\n')
+	#log_training.flush()
+
+
+
+	print("test pass")
+
+
+
 output = []
 #from tensorboardX import SummaryWriter
 #writer = SummaryWriter(logdir = "/home/u9210700/myownTSM/featuremap/")
+'''
 def visualize_featuremap(x, model, step, label, this_test_segments, writer):
 
 	x = x.view(-1, x.size(2), x.size(3), x.size(4)).cuda()
@@ -544,3 +765,4 @@ print('upper bound: {}'.format(upper))
 print('-----Evaluation is finished------')
 print('Class Accuracy {:.02f}%'.format(np.mean(cls_acc) * 100))
 print('Overall Prec@1 {:.02f}% Prec@5 {:.02f}%'.format(top1.avg, top5.avg))
+'''

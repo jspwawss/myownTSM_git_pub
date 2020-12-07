@@ -21,9 +21,12 @@ from torchsummaryX import summary
 best_prec1 = 0
 prune_conv1in_list = {}
 prune_conv1out_list = {}
+crop_size = 256
 
 def main():
 	global args, best_prec1
+	global crop_size
+	crop_size = 256
 	args = parser.parse_args()
 
 	num_class, train_list, val_list, args.root_path, prefix = dataset_config.return_dataset(args.dataset, args.modality)
