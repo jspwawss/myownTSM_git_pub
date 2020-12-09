@@ -66,6 +66,8 @@ class Lang:
         return self.word2index[word]
     def getdict(self):
         return self.word2index
+    def getindex2wordDict(self):
+        return self.index2word
 
 def save_object(obj, filename):
     with open(filename, 'wb') as output:  # Overwrites any existing file.
@@ -121,6 +123,8 @@ def word2tensor(folderPath:str=os.path.join(r'/home/share/YouCook',"captions_v2"
     a = eng.getdict()
 
     save_object(a, "engDictAnn.pkl")
+    b = eng.getindex2wordDict()
+    save_object(b, "indexDictAnn.pkl")
 
 class VideoRecord(object):
     def __init__(self, row):
@@ -200,6 +204,7 @@ class YouCookDataSetRcg(data.Dataset):
             print("not hasWordIndex")
         print(" hasWordIndex")
         self.word2index = load_object("engDictAnn.pkl")
+        self.index2word = load_object("indexDictAnn.pkl")
 
         self.tmpFilename = None
         self.VideoTimeStamps = None
@@ -265,17 +270,26 @@ class YouCookDataSetRcg(data.Dataset):
                             self.llist.append([key, value["recipe_type"], segments["segment"], segments["sentence"], value["duration"]])
 
                 pass
-
+    def getDict(self):
+        return self.word2index
+    def getIndex2wordDict(self,):
+        return self.index2word
                                
     def _takeSeg(self,_segment):
         return _segment[0][1]-_segment[0][0]
     def _takeid(self,_id):
         return _id[2]
 
+    def _tensor2onehot(self, tensor):
+        value = torch.zeros(len(self.word2index), dtype=torch.float,)
+        value[tensor.data] = 1
+        return value
+
     def _word2tensor(self, sentence:str):
         captions = sentence.strip().split(" ")
         #print(captions)
-        capRes = torch.zeros(MAX_LENGTH, dtype=torch.long,) 
+        #capRes = torch.zeros(MAX_LENGTH, dtype=torch.long,)
+        capRes = torch.zeros(len(captions)+1, dtype=torch.long,) #+1 for eos
         for idx, caption in enumerate(captions):
             capRes[idx] = torch.tensor(self.word2index[caption], dtype=torch.long,)
 
@@ -289,7 +303,7 @@ class YouCookDataSetRcg(data.Dataset):
             else:
                 capRes[len(captions)] = torch.tensor(EOS_token, dtype=torch.long)
         else:
-            capRes[len(captions)] = torch.tensor(EOS_token, dtype=torch.long,   )
+            capRes[len(captions)] = torch.tensor(EOS_token, dtype=torch.long, )
          
         #capRes = torch.tensor(capRes,dtype=torch.long,).view(-1,1)
         #print("capRes********") 
@@ -301,6 +315,7 @@ class YouCookDataSetRcg(data.Dataset):
         #        pass
         #print(capRes)
         #exit()
+       
         return capRes
         pass
     def _getSentence(self,id:str = None, URL:str=None,segment:list=None): #get annotations sentence

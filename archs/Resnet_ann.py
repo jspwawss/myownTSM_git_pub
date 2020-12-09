@@ -173,6 +173,56 @@ class DecoderRNN(nn.Module):
     def initHidden(self):
         return torch.zeros((1, 1, self.hidden_size),dtype=torch.float).cuda()
 
+class FeatureEncoder(nn.Module):
+    def __init__(self, ):
+        pass
+    def forward(self, input, hidden, ):
+        pass
+
+class AttnDecoderRNN(nn.Module):
+    def __init__(self, hidden_size=128, output_size=None, dropout_p=0.1, feature_length=64): #64 = input word maximum length, 128 = embedded dim
+        super(AttnDecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+        self.word2index = load_object("engDictAnn.pkl")
+        self.output_size = len(self.word2index)+2 #+sos eos
+        
+        self.dropout_p = dropout_p
+        self.feature_length = feature_length
+
+        self.embedding = nn.Embedding(self.output_size, self.hidden_size)
+        self.attn = nn.Linear(self.hidden_size*2, self.feature_length)
+        self.attn_combine = nn.Linear(self.hidden_size*2, self.hidden_size)
+        self.dropout = nn.Dropout(self.dropout_p)
+        self.gru = nn.GRU(self.hidden_size, self.hidden_size)
+        self.out = nn.Linear(self.hidden_size, self.output_size)
+
+    def forward(self, input, hidden, encoder_output):
+        repeat_encoder_output = encoder_output.repeat(self.feature_length,1)
+        print(repeat_encoder_output[0,0:5], repeat_encoder_output[1,0:5])
+        embedded = self.embedding(input).view(1,1,-1)
+        embedded = self.dropout(embedded)
+        print("embedded size=",embedded.size())
+        print("hidden size=", hidden.size())
+        attn_weights = F.softmax(
+            self.attn(torch.cat((embedded[0], hidden[0]),1)),  dim=1
+        )
+        print("attn_weights size = {}, encoder_output.size()={}, repeat_encoder_output={}".format(attn_weights.size(), encoder_output.size(), repeat_encoder_output.size()))
+        attn_applied = torch.bmm(attn_weights.unsqueeze(0), repeat_encoder_output.unsqueeze(0))
+        print("attn_applied=",attn_applied.size())
+        output = torch.cat((embedded[0], attn_applied[0]), 1)
+        output = self.attn_combine(output).unsqueeze(0)
+        print("214",output.size())
+        output = F.relu(output)
+        output, hidden = self.gru(output, hidden)
+        print("217",output.size())
+        output = F.log_softmax(self.out(output[0]), dim=1)
+        print("219",output.size())
+        return output, hidden, attn_weights
+
+    def initHidden(self):
+        return torch.zeros(1,1,self.hidden_size).cuda()
+
+
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
@@ -219,6 +269,8 @@ class ResNet(nn.Module):
         self.embedding = nn.Embedding(self.input_size, self.hidden_size) #prevent errors
         self.gru = nn.GRU(self.hidden_size, self.hidden_size)
 
+        self.gru4feature = nn.GRU(2048, 128)
+        self.decoder = decoder(self.hidden_size, self.input_size)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -250,7 +302,7 @@ class ResNet(nn.Module):
         output = embedded
         #print(output.size())
         output, hidden = self.gru(output, hidden)
-        #print(output.size(),hidden.size())
+        #print("output.size={}, hidden.size={}".format(output.size(),hidden.size()))
         #print(embedded)
         #print(output)
         return output, hidden
@@ -362,24 +414,32 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         #print("avgpol x.size",x.size())
-        x = torch.flatten(x, 1)
+        ###x = torch.flatten(x, 1)
         #print(x.size())
-        x = x.unsqueeze(-1)
+        #x = x.unsqueeze(-1)
         #print(x.size())
-        x = self.lastconv(x)
+        #####x = self.lastconv(x)
+        ##x, hidden = self.decoder(x)
         #print("*"*50)
         #print(x.size())
         #x = self.fc(x)
         #x, hidden = self.decoder(x)
         #print("fc ", x.size())
+        hidden_state = self.initHidden()
+        for frame in x:
+            
+            #print("frame feature dim=", frame.size())
+            _, hidden_state = self.gru4feature(frame.view(1,1,-1), hidden_state)
+
+        #print("hidden state size = ",hidden_state.size())
         if TFDEM:
             return x, spatial_temporal_feature
         else:
-            return x
+            return hidden_state
 
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
-    model = ResNet(block, layers, **kwargs, decoder=DecoderRNN, encoder=EncoderRNN)
+    model = ResNet(block, layers, **kwargs, decoder=AttnDecoderRNN, encoder=EncoderRNN)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)

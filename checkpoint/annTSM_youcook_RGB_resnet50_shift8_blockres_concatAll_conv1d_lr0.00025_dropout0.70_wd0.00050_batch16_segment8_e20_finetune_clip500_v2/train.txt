@@ -1,0 +1,4 @@
+epoch	0
+Epoch: [0][0/3340], lr: 0.0001250	Time 17.213 (17.213)	Loss 68.7583 (68.7583)	output/target['making', 'gant', 'gabi', 'blogs', 'experimental', 'blogs', 'gabi']/['cut', 'the', 'skin', 'off', 'the', 'fish', 'EOS']bleu 0.0000 (0.000)	
+Epoch: [0][1/3340], lr: 0.0001250	Time 20.607 (18.910)	Loss 78.6039 (73.6811)	output/target['tenderizer', 'indulgence', 'progressed', 'ed', 'cruel', 'baloons', 'baloons', 'devon']/['cut', 'the', 'dark', 'part', 'off', 'the', 'fish', 'EOS']bleu 0.0000 (0.000)	
+Epoch: [0][2/3340], lr: 0.0001250	Time 12.993 (16.937)	Loss 78.1187 (75.1603)	output/target['making', 'buttter', 'raccoon', 'chipped', 'gabi', 'gabi', 'vegg', 'gabi']/['cut', 'the', 'fish', 'into', 'a', 'medium', 'chunk', 'EOS']bleu 0.0000 (0.000)	

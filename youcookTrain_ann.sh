@@ -7,7 +7,7 @@ python3 main_ann.py youcook RGB \
 	--batch-size 16 -j 16 --dropout 0.7 --consensus_type=conv1d --eval-freq=1 \
 	--shift --shift_div=8 --shift_place=blockres --concat=All  \
 	--tune_from=/home/ubuntu/backup_kevin/myownTSM_git/pretrained/TSM_kinetics_RGB_resnet50_shift8_blockres_avg_segment8_e50.pth \
-	--suffix=slice_v2 --loss_type=BCELoss --clipnums=500
+	--suffix=v2 --loss_type=CrossEntropyLoss --clipnums=500
 	2>err.log
 
 #MSTSM+TFDEM+prune

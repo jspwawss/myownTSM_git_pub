@@ -8,13 +8,16 @@ from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 
 
-from ops.dataset_slice_v1 import YouCookDataSetRcg
-from ops.models import TSN
+from ops.dataset_ann import YouCookDataSetRcg
+from ops.models_ann import TSN
 from ops.transforms import *
 from opts import parser
 from ops import dataset_config
 from ops.utils import AverageMeter, AUC
 from ops.temporal_shift import make_temporal_pool
+from archs.Resnet_ann import AttnDecoderRNN
+
+from nltk.translate.bleu_score import sentence_bleu
 
 from tensorboardX import SummaryWriter
 from torchsummaryX import summary
@@ -42,7 +45,7 @@ def main():
 		full_arch_name += '_concat{}'.format(args.concat)
 	if args.temporal_pool:
 		full_arch_name += '_tpool'
-	args.store_name = '_'.join(
+	args.store_name += '_'.join(
 		['TSM', args.dataset, args.modality, full_arch_name, args.consensus_type, 'lr%.5f' % args.lr, 'dropout%.2f' % args.dropout, 'wd%.5f' % args.weight_decay,
 		 'batch%d' % args.batch_size, 'segment%d' % args.num_segments, 'e{}'.format(args.epochs)])
 	if args.data_fuse:
@@ -104,14 +107,14 @@ def main():
 	input_mean = model.input_mean
 	input_std = model.input_std
 	policies = model.get_optim_policies(args.concat)
+	#print(type(policies))
+	#print(policies)
+	#exit()
 	train_augmentation = model.get_augmentation(flip=False if 'something' in args.dataset or 'jester' in args.dataset or 'nvgesture' in args.dataset else True)
 
 	model = torch.nn.DataParallel(model).cuda()
 
-	optimizer = torch.optim.SGD(policies,
-								args.lr,
-								momentum=args.momentum,
-								weight_decay=args.weight_decay)
+	
 
 	if args.resume:
 		if args.temporal_pool:  # early temporal pool so that we can load the state_dict
@@ -177,8 +180,18 @@ def main():
 	if args.temporal_pool and not args.resume:
 		make_temporal_pool(model.module.base_model, args.num_segments)
 
+	decoder = AttnDecoderRNN().cuda()
+	if args.decoder_resume:
+		decoder_chkpoint = torch.load(args.decoder_resume)
+		
+		decoder.load_state_dict(decoder_chkpoint["state_dict"])
+	print(decoder.parameters())
+	policies.append({"params":decoder.parameters(), "lr_mult":5, "decay_mult":1, "name": "Attndecoder_weight"})
 	cudnn.benchmark = True
-
+	optimizer = torch.optim.SGD(policies,
+								args.lr,
+								momentum=args.momentum,
+								weight_decay=args.weight_decay)
 	# Data loading code
 	if args.modality != 'RGBDiff':
 		normalize = GroupNormalize(input_mean, input_std)
@@ -260,6 +273,7 @@ def main():
 	val_loader = torch.utils.data.DataLoader(
 		valDataloader
 	)
+	index2wordDict = trainDataloader.getIndex2wordDict()
 	#print(train_loader is val_loader)
 	#print(trainDataloader._getMode())
 	#print(valDataloader._getMode())
@@ -267,15 +281,20 @@ def main():
 	#print(trainDataloader._getMode())
 	#print(valDataloader._getMode())
 	#print(len(train_loader))
+
+
+	
 	#exit()
 	# define loss function (criterion) and optimizer
 	if args.loss_type == 'nll':
-		criterion = torch.nn.CrossEntropyLoss().cuda()
+		criterion = torch.nn.NLLLoss().cuda()
 	elif args.loss_type == "MSELoss":
 		criterion = torch.nn.MSELoss().cuda()
 	elif args.loss_type == "BCELoss":
 		#print("BCELoss")
 		criterion = torch.nn.BCELoss().cuda()
+	elif args.loss_type == "CrossEntropyLoss":
+		criterion = torch.nn.CrossEntropyLoss().cuda()
 	else:
 		raise ValueError("Unknown loss type")
 
@@ -301,12 +320,12 @@ def main():
 		######
 		#print(trainDataloader._getMode())
 		#print(valDataloader._getMode())
-		train(train_loader, model, criterion, optimizer, epoch, log_training, tf_writer)
+		train(train_loader, model,decoder, criterion, optimizer, epoch, log_training, tf_writer, index2wordDict)
 		######
 		#print("268")
 		# evaluate on validation set
 		if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
-			prec1 = validate(val_loader, model, criterion, epoch, log_training, tf_writer)
+			prec1 = validate(val_loader, model,decoder, criterion, epoch, log_training, tf_writer, index2wordDict=index2wordDict)
 
 			# remember best prec@1 and save checkpoint
 			is_best = prec1 > best_prec1
@@ -325,6 +344,13 @@ def main():
 				'optimizer': optimizer.state_dict(),
 				'best_prec1': best_prec1,
 			}, is_best)
+			save_checkpoint({
+				'epoch': epoch + 1,
+				'arch': args.arch,
+				'state_dict': decoder.state_dict(),
+				'optimizer': optimizer.state_dict(),
+				'best_prec1': best_prec1,
+			}, is_best, filename="decoder")
 		else:
 			save_checkpoint({
 				'epoch': epoch + 1,
@@ -333,10 +359,17 @@ def main():
 				'optimizer': optimizer.state_dict(),
 				'best_prec1': best_prec1,
 			}, False)
+			save_checkpoint({
+				'epoch': epoch + 1,
+				'arch': args.arch,
+				'state_dict': decoder.state_dict(),
+				'optimizer': optimizer.state_dict(),
+				'best_prec1': best_prec1,
+			}, is_best, filename="decoder")
 		#break
 		print("test pass")
 
-def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
+def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_writer, index2wordDict):
 	#global trainDataloader, valDataloader
 
 	#print(len(train_loader))
@@ -345,7 +378,9 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
 	losses = AverageMeter()
-	AUCs = AverageMeter()
+	BLEUs = AverageMeter()
+	
+	teacher_forcing_ratio = 0.5
 	#losses_extra = AverageMeter()
 	#top1 = AverageMeter()
 	#top5 = AverageMeter()
@@ -362,8 +397,10 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	#print("308")
 	end = time.time()
 	#print("in train")
+	with open(os.path.join(args.root_model, args.store_name, "train.txt"), "a+") as txt:
+		txt.write("epoch\t"+str(epoch)+"\n")
 	for i, data in enumerate(train_loader):
-		
+		loss = 0
 		#print("data fetch finish ",i)
 		
 
@@ -383,9 +420,14 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 		input_caption=torch.tensor([],dtype=torch.long).cuda()
 		#cap_nums = []
 
-		for clip in clips:
-			video = clip[0]
-			caption = clip[1]
+		for clip in range(0,len(clips),max(len(clips)//50,1)):
+			print(type(input_video.size()))
+			print(input_video.size())
+			if list(input_video.size()) != [0]:
+				if input_video.size()[1] > 50:
+					break
+			video = clips[clip][0]
+			caption = clips[clip][1]
 			input_video = torch.cat((input_video, video.float().cuda()),1)
 			input_caption = torch.cat((input_caption, caption.long().cuda()),0)
 			#cap_nums.append(clip[2])
@@ -406,41 +448,85 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 
 		# compute output
 		wExtraLoss = 1 if args.prune == '' else 0.1
-		output = model(input_video_var, input_caption_var)
-		#print("output size=",output.size())
+		print("input video size=",input_video.size())
+		encoder_output = model(input_video_var, input_caption_var) #size=(1, frames, 2048)
+		
+		print("encoder_output size=",encoder_output.size())
+		decoder_outputs = []
+		decoder_input = torch.tensor([[0]]).cuda() #SOS
+		decoder_hidden = decoder.initHidden()
+		use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+		#if False:
+		if use_teacher_forcing:
+
+			print("target size=,",target.size())
+		
+			print("target= ", target)
+			for tar in target[0]:
+				decoder_output, decoder_hidden , _ = decoder(decoder_input, decoder_hidden, encoder_output)
+				print("tar = ",tar)
+				print("tar size = ",tar.size())
+				decoder_output_word = decoder_output.argmax().cpu()
+				decoder_outputs.append(decoder_output_word)
+				print("decoder_output_word=",decoder_output_word)
+				#ttar = torch.zeros(17469, dtype=torch.long).unsqueeze(0).cuda()
+				#ttar[0,tar.data] = torch.tensor(1, dtype=torch.long).cuda()
+				#print("ttar size={}, decoder_output size={}".format(ttar.size(), decoder_output.size()))
+				#print(decoder_output)
+				#print(args.loss_type)
+				#print(criterion)
+				loss += criterion(decoder_output,tar.unsqueeze(0))
+				decoder_input = tar  # Teacher forcing
+		else:
+			print("without teacher forcing")
+			# Without teacher forcing: use its own predictions as the next input
+			for tar in target[0]:
+				decoder_output, decoder_hidden, _ = decoder(decoder_input, decoder_hidden, encoder_output)
+				decoder_output_word = decoder_output.argmax().cpu()
+				decoder_outputs.append(decoder_output_word)
+				topv, topi = decoder_output.topk(1)
+				decoder_input = topi.squeeze().detach()  # detach from history as input
+
+				loss += criterion(decoder_output, tar.unsqueeze(0))
+				print("-"*50)
+				print("decoder_input item=",decoder_input.item())
+				print(loss)
+				if decoder_input.item() == 1:
+					break
+		print("{0:*^50}".format("loss "+ str(loss)))
+		
+		#exit()
 		#print("target)var=",target_var.size())
 		#print(output)
 		#print(target_var)
 		#print("label size=",label.size())
 		#print(output.size())
 		#print(target_var.size())
-		loss_main = criterion(output.squeeze(), target_var.squeeze())
+		#loss_main = criterion(output.squeeze(), target_var.squeeze())
 		#loss_main = 0
 		#lloss = torch.sub(output, target_var).squeeze()
 		#for l in lloss:
 		#	loss_main += l**2
 		#extra_loss = criterion(extra, target_var)*wExtraLoss
 		#loss = loss_main + extra_loss
-		loss = loss_main
+		#loss = loss_main
 		#print("loss=",loss)
-		losses.update(loss_main.item(), )
-		'''
-		# measure accuracy and record loss
-		prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-		losses.update(loss_main.item(), input.size(0))
-		top1.update(prec1.item(), input.size(0))
-		top5.update(prec5.item(), input.size(0))
-		'''
-		auc = AUC(output.squeeze(), target_var.squeeze())
-		#print("auc=",auc)
-		AUCs.update(auc)
-		#print("after AUCs update")
-		'''
-		prec1_extra, prec5_extra = accuracy(extra.data, target, topk=(1, 5))
-		losses_extra.update(extra_loss.item(), input.size(0))
-		top1_extra.update(prec1_extra.item(), input.size(0))
-		top5_extra.update(prec5_extra.item(), input.size(0))
-		'''
+		losses.update(loss.item(), )
+		print(decoder_outputs)
+		print(decoder_outputs[0].item())
+		decoder_sentence = [index2wordDict[index.item()] for index in decoder_outputs]
+		print(decoder_sentence)
+		print(target.size())
+		
+		target_sentence = [index2wordDict[index.item()] for index in target[0]]
+		
+		print(target_sentence)
+		bleu = sentence_bleu(target_sentence, decoder_sentence ) #default weight is [0.25,0.25,0.25,0.25] = bleu-4
+		print("bleu =",bleu)
+
+		BLEUs.update(bleu)
+		
+
 		# compute gradient and do SGD step
 		st = time.time()
 		loss.backward()
@@ -456,49 +542,37 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 		# measure elapsed time
 		batch_time.update(time.time() - end)
 		end = time.time()
-		'''
-		if i % args.print_freq == 0:
-			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
-					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-					  'Loss_h {losses_extra.val:.4f} ({losses_extra.avg:.4f})\t'
-					  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-					  .format(
-				epoch, i, len(train_loader), batch_time=batch_time,
-				data_time=data_time, loss=losses, losses_extra=losses_extra, top1=top1, top5=top5, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
-			print(output)
-			log.write(output + '\n')
-			log.flush()
-		'''
-		if i % args.print_freq == 0:
-			output = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
+		txtoutput = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
 					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
 					  "output/target{output}/{target}"
-					  'auc {auc.val:.4f} ({auc.avg:.3f})\t'
+					  'bleu {bleu.val:.4f} ({bleu.avg:.3f})\t'
 					  .format(
-				epoch, i, len(train_loader), batch_time=batch_time,output=output, target=target,
-				data_time=data_time, loss=losses,  auc=AUCs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
-			print(output)
-			log.write(output + '\n')
+				epoch, i, len(train_loader), batch_time=batch_time,output=decoder_sentence, target=target_sentence,
+				data_time=data_time, loss=losses,  bleu=BLEUs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
+		if i % args.print_freq == 0:
+			
+			print(txtoutput)
+			log.write(txtoutput + '\n')
 			log.flush()
-		#print("**"*50)
+		with open(os.path.join(args.root_model, args.store_name, "train.txt"), "a+") as txt:
+			txt.write(txtoutput+"\n")
+		print("**"*50)
 		#break
 		#exit()
 
 	tf_writer.add_scalar('loss/train', losses.avg, epoch)
 	#tf_writer.add_scalar('acc/train_top1', top1.avg, epoch)
 	#tf_writer.add_scalar('acc/train_top5', top5.avg, epoch)
-	tf_writer.add_scalar('auc/train', AUCs.avg, epoch)
+	tf_writer.add_scalar('auc/train', BLEUs.avg, epoch)
 	tf_writer.add_scalar('lr', optimizer.param_groups[-1]['lr'], epoch)
 
-
-def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
+def validate(val_loader, model, decoder, criterion, epoch, log=None, tf_writer=None, index2wordDict=None):
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
-	losses = AverageMeter()
-	AUCs = AverageMeter()
-
+	#losses = AverageMeter()
+	BLEUs = AverageMeter()
+	
 	# switch to evaluate mode
 	model.eval()
 
@@ -507,11 +581,12 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
 			txt.write("epoch\t"+str(epoch)+"\n")
 		for i, data in enumerate(val_loader):
+			loss = 0
 			data_time.update(time.time() - end)
-	#		if isinstance(data, bool):
+		#if isinstance(data, bool):
 		#		continue
 			#if not torch.any(data):
-	#			continue
+		#	continue
 			if not data:
 				continue
 			try:
@@ -524,9 +599,13 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 			input_video=torch.tensor([],dtype=torch.float).cuda()
 			input_caption=torch.tensor([],dtype=torch.long).cuda()
 			#cap_nums = []
-			for clip in clips:
-				video = clip[0]
-				caption = clip[1]
+			for clip in range(0,len(clips),max(len(clips)//50,1)):
+				if list(input_video.size()) != [0]:
+					
+					if input_video.size()[1] > 50:
+						break
+				video = clips[clip][0]
+				caption = clips[clip][1]
 				input_video = torch.cat((input_video, video.float().cuda()),1)
 				input_caption = torch.cat((input_caption, caption.long().cuda()),0)
 				#cap_nums.append(clip[2])			#for recording filename in result
@@ -543,69 +622,97 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
 			# compute output
 			wExtraLoss = 1 if args.prune == '' else 0.1
-			output = model(input_video_var, input_caption_var)
+			encoder_output = model(input_video_var, input_caption_var) #size=(1, frames, 2048)
+			decoder_outputs = []
+			decoder_input = torch.tensor([[0]]).cuda() #SOS
+			decoder_hidden = decoder.initHidden()
+
+			print("without teacher forcing")
+			# Without teacher forcing: use its own predictions as the next input
+			while decoder_input.squeeze().item != 1 and len(decoder_outputs)<64:	
+				decoder_output, decoder_hidden, _ = decoder(decoder_input, decoder_hidden, encoder_output)
+				decoder_output_word = decoder_output.argmax().cpu()
+				decoder_outputs.append(decoder_output_word)
+				topv, topi = decoder_output.topk(1)
+				decoder_input = topi.squeeze().detach()  # detach from history as input
+
+				#loss += criterion(decoder_output, tar.unsqueeze(0))
+				print("-"*50)
+				print("decoder_input item=",decoder_input.item())
+				#print(loss)
+				if decoder_input.item() == 1:
+					break
+			
 			#print("output size=",output.size())
 			#print("target)var=",target_var.size())
 			#print(output)
 			#print(target_var)
 
+			decoder_sentence = [index2wordDict[index.item()] for index in decoder_outputs]
+			print(decoder_sentence)
+			#print(target.size())
+			
+			target_sentence = [index2wordDict[index.item()] for index in target[0]]
+			
+			print(target_sentence)
+			bleu = sentence_bleu(target_sentence, decoder_sentence ) #default weight is [0.25,0.25,0.25,0.25] = bleu-4
+			#print("bleu =",bleu)
 
-			loss = criterion(output, target)
+			BLEUs.update(bleu)
+			
 
-			auc = AUC(output.squeeze(), target_var.squeeze())
+			#auc = AUC(output.squeeze(), target_var.squeeze())
 			#print("auc=",auc)
 
-			AUCs.update(auc)
+			#AUCs.update(auc)
 
-			losses.update(loss.item(), )
+			#losses.update(loss.item(), )
 
 
 			# measure elapsed time
 			batch_time.update(time.time() - end)
 			end = time.time()
-			output = ('Test: [{0}/{1}]\t'
+			txtoutput = ('Test: [{0}/{1}]\t'
 						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						
-						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
-				i, len(val_loader), batch_time=batch_time, loss=losses,
-					top5=AUCs))	
+						'BLEU {top5.val:.3f} ({top5.avg:.3f}\t'
+						"output/target {output}/{target}"
+						).format(
+				i, len(val_loader), batch_time=batch_time,output=decoder_sentence,target=target_sentence,
+					top5=BLEUs)	
 			if i % args.print_freq == 0:
-				output = ('Test: [{0}/{1}]\t'
-						  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-						  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						  "output/target {output}/{target}"
-						  'AUC {aucs.val:.3f} ({aucs.avg:.3f})'.format(
-					i, len(val_loader), batch_time=batch_time, loss=losses,output=output,target=target,
-					 aucs=AUCs))
-				print(output)
+				print(txtoutput)
 				if log is not None:
-					log.write(output + '\n')
+					log.write(txtoutput + '\n')
 					log.flush()
 
 
 			with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
-				txt.write(output+"\n")
+				txt.write(txtoutput+"\n")
 
 			#break
 
-		output = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
-			  	.format(auc=AUCs, loss=losses))
-	print(output)
+		txtoutput = ('Testing Results: BLEUs {auc.avg:.3f} '.format(auc=BLEUs))
+		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+			txt.write(txtoutput+"\n")	
+
+	print(txtoutput)
 	if log is not None:
-		log.write(output + '\n')
+		log.write(txtoutput + '\n')
 		log.flush()
 
 	if tf_writer is not None:
-		tf_writer.add_scalar('loss/test', losses.avg, epoch)
+		#tf_writer.add_scalar('loss/test', losses.avg, epoch)
 		#tf_writer.add_scalar('acc/test_top1', top1.avg, epoch)
 		#tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
-		tf_writer.add_scalar('auc/test', AUCs.avg, epoch)
-	return AUCs.avg
+		tf_writer.add_scalar('bleu/test', BLEUs.avg, epoch)
+	return BLEUs.avg
 
 
-def save_checkpoint(state, is_best, ):
-	filename = '%s/%s/ckpt_%s.pth.tar' % (args.root_model, args.store_name, state['epoch'])
+def save_checkpoint(state, is_best, filename=None,):
+	if filename == None:
+		filename = '%s/%s/ckpt_%s.pth.tar' % (args.root_model, args.store_name, state['epoch'])
+	else:
+		filename = '%s/%s/%s_ckpt_%s.pth.tar' % (args.root_model, args.store_name, filename, state['epoch'])
 	torch.save(state, filename)
 	if is_best:
 		shutil.copyfile(filename, filename.replace('pth.tar', 'best.pth.tar'))

@@ -308,7 +308,8 @@ def main():
 		#print("268")
 		# evaluate on validation set
 		#model = model.load_state_dict(torch.load("/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e20_finetune_slice_v1_clipnum500/ckpt_"+str(epoch+1)+".pth.tar"))
-		if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
+		#if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
+		if False:
 			prec1 = validate(val_loader, model, criterion, epoch, log_training, tf_writer)
 
 			# remember best prec@1 and save checkpoint
@@ -365,6 +366,8 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 	#print("308")
 	end = time.time()
 	#print("in train")
+	with open(os.path.join(args.root_model, args.store_name, "train.txt"), "a+") as txt:
+		txt.write("epoch\t"+str(epoch)+"\n")
 	for idx, data in enumerate(train_loader):
 		
 		#print("data fetch finish ",i)
@@ -497,19 +500,22 @@ def train(train_loader, model, criterion, optimizer, epoch, log, tf_writer):
 			log.write(output + '\n')
 			log.flush()
 		'''
+		txtoutput = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
+				'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+				'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+				"output/target\t{output}/\t{target}\t"
+				'auc {auc.val:.4f} ({auc.avg:.3f})\t'
+				.format(
+			epoch, idx, len(train_loader), batch_time=batch_time,output=output, target=target,
+			data_time=data_time, loss=losses,  auc=AUCs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
 		if idx % args.print_freq == 0:
-			txtoutput = ('Epoch: [{0}][{1}/{2}], lr: {lr:.7f}\t'
-					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-					  "output/target\t{output}/\t{target}\t"
-					  'auc {auc.val:.4f} ({auc.avg:.3f})\t'
-					  .format(
-				epoch, idx, len(train_loader), batch_time=batch_time,output=output, target=target,
-				data_time=data_time, loss=losses,  auc=AUCs, lr=optimizer.param_groups[-1]['lr'] * 0.1))  # TODO
+
 			print(txtoutput)
 			log.write(txtoutput + '\n')
 			log.flush()
 		print("**"*50)
+		with open(os.path.join(args.root_model, args.store_name, "train.txt"), "a+") as txt:
+			txt.write(txtoutput+"\t"+str(URL)+"\t"+str(id)+"\n")
 		#break
 		#exit()
 
@@ -648,9 +654,9 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 			txtoutput = ('Test: [{0}/{1}]\t'
 						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-						"output\target\t{output}\t{target}"		
+						"totalOutput\totalTarget\t{totalOutput}\t{totalTarget}"		
 						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
-				idx, len(val_loader), batch_time=batch_time, loss=losses,output=output, target=target,
+				idx, len(val_loader), batch_time=batch_time, loss=losses,totalOutput=totalOutput, target=totalTarget,
 					top5=AUCs))	
 			if idx % args.print_freq == 0:
 				#output = ('Test: [{0}/{1}]\t'
@@ -667,12 +673,14 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 
 
 			with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
-				txt.write(txtoutput+"\n")
+				txt.write(txtoutput+"\t"+str(URL)+"\t"+str(id)+"\n")
 
 			#break
 
 		txtoutput = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
 			  	.format(auc=AUCs, loss=losses))
+		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+			txt.write(txtoutput+"\t"+str(URL)+"\t"+str(id)+"\n")
 	print(txtoutput)
 	if log is not None:
 		log.write(txtoutput + '\n')

@@ -21,11 +21,12 @@ parser.add_argument('--k', type=int, default=3)
 parser.add_argument('--dropout', '--do', default=0.5, type=float,
                     metavar='DO', help='dropout ratio (default: 0.5)')
 parser.add_argument('--loss_type', type=str, default="nll",
-                    choices=['nll',"MSELoss","BCELoss"])
+                    choices=['nll',"MSELoss","BCELoss", "CrossEntropyLoss"])
 parser.add_argument('--img_feature_dim', default=256, type=int, help="the feature dimension for each frame")
 parser.add_argument('--suffix', type=str, default=None)
 parser.add_argument('--pretrain', type=str, default='imagenet')
 parser.add_argument('--tune_from', type=str, default=None, help='fine-tune from checkpoint')
+
 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=120, type=int, metavar='N',
@@ -85,3 +86,5 @@ parser.add_argument('--prune', type = str, default = "", choices = ["input", "ou
 
 
 parser.add_argument('--clipnums', type = str, default = "", help='numbers of clips')
+parser.add_argument('--decoder_resume', default='', type=str, metavar='PATH',
+                    help='path to latest decoder checkpoint (default: none)')
