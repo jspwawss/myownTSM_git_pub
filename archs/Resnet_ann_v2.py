@@ -428,9 +428,9 @@ class ResNet(nn.Module):
         hidden_state = self.initHidden()
         for frame in x:
             
-            #print("frame feature dim=", frame.size())
+            print("frame feature dim=", frame.size())
             _, hidden_state = self.gru4feature(frame.view(1,1,-1), hidden_state)
-
+        exit()
         #print("hidden state size = ",hidden_state.size())
         if TFDEM:
             return x, spatial_temporal_feature
