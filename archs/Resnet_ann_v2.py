@@ -197,7 +197,8 @@ class AttnDecoderRNN(nn.Module):
         self.out = nn.Linear(self.hidden_size, self.output_size)
 
     def forward(self, input, hidden, encoder_output):
-        repeat_encoder_output = encoder_output.repeat(self.feature_length,1)
+        repeat_encoder_output = encoder_ouput
+        #repeat_encoder_output = encoder_output.repeat(self.feature_length,1)
         print(repeat_encoder_output[0,0:5], repeat_encoder_output[1,0:5])
         embedded = self.embedding(input).view(1,1,-1)
         embedded = self.dropout(embedded)
