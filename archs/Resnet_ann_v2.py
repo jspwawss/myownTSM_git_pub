@@ -426,11 +426,12 @@ class ResNet(nn.Module):
         #x, hidden = self.decoder(x)
         #print("fc ", x.size())
         hidden_state = self.initHidden()
-        for frame in x:
+        encoder_output = torch.zeros((64, 128), dtype=torch.float).cuda()
+        for idx, frame in enumerate(x):
             
             print("frame feature dim=", frame.size())
-            _, hidden_state = self.gru4feature(frame.view(1,1,-1), hidden_state)
-        exit()
+            encoder_output[idx], hidden_state = self.gru4feature(frame.view(1,1,-1), hidden_state)
+        #exit()
         #print("hidden state size = ",hidden_state.size())
         if TFDEM:
             return x, spatial_temporal_feature
