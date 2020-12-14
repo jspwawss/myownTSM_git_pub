@@ -265,7 +265,7 @@ class ResNet(nn.Module):
         #self.encoder = encoder(64,256)
         #self.input_size = 64
         self.hidden_size = 128
-        self.word2index = load_object("engDict.pkl")
+        self.word2index = load_object("engDictAnn.pkl")
         self.input_size = len(self.word2index)+2 #+sos eos
         self.embedding = nn.Embedding(self.input_size, self.hidden_size) #prevent errors
         self.gru = nn.GRU(self.hidden_size, self.hidden_size)
