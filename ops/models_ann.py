@@ -129,7 +129,7 @@ class TSN(nn.Module):
         print('=> base model: {}'.format(base_model))
 
         if 'resnet' in base_model:
-            from archs.Resnet_ann import __resnet__
+            from archs.Resnet_ann_v2 import __resnet__
             self.base_model = __resnet__(base_model, True if self.pretrain == 'imagenet' else False, self.extra_temporal_modeling, 
                                                 self.num_segments, self.num_class)
             if self.is_shift:
@@ -468,7 +468,7 @@ class TSN(nn.Module):
                 #output = self.activate(base_out)
                 #print(output)
                 #print("outputsize-----",output.size())
-                return base_out.view(1,-1)
+                return base_out.view(1,base_out.size()[0],base_out.size()[1])
                 ###return base_out.view(1,base_out.size()[0], base_out.size()[1])
                 #return base_out.squeeze(1).unsqueeze(0)
                 #return base_out.squeeze(1)

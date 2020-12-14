@@ -197,27 +197,27 @@ class AttnDecoderRNN(nn.Module):
         self.out = nn.Linear(self.hidden_size, self.output_size)
 
     def forward(self, input, hidden, encoder_output):
-        repeat_encoder_output = encoder_ouput
+        repeat_encoder_output = encoder_output
         #repeat_encoder_output = encoder_output.repeat(self.feature_length,1)
-        print(repeat_encoder_output[0,0:5], repeat_encoder_output[1,0:5])
+        #print(repeat_encoder_output[0,0:5], repeat_encoder_output[1,0:5])
         embedded = self.embedding(input).view(1,1,-1)
         embedded = self.dropout(embedded)
-        print("embedded size=",embedded.size())
-        print("hidden size=", hidden.size())
+        #print("embedded size=",embedded.size())
+        #print("hidden size=", hidden.size())
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded[0], hidden[0]),1)),  dim=1
         )
-        print("attn_weights size = {}, encoder_output.size()={}, repeat_encoder_output={}".format(attn_weights.size(), encoder_output.size(), repeat_encoder_output.size()))
-        attn_applied = torch.bmm(attn_weights.unsqueeze(0), repeat_encoder_output.unsqueeze(0))
-        print("attn_applied=",attn_applied.size())
+        #print("attn_weights size = {}, encoder_output.size()={}, repeat_encoder_output={}".format(attn_weights.size(), encoder_output.size(), repeat_encoder_output.size()))
+        attn_applied = torch.bmm(attn_weights.unsqueeze(0), repeat_encoder_output)
+        #print("attn_applied=",attn_applied.size())
         output = torch.cat((embedded[0], attn_applied[0]), 1)
         output = self.attn_combine(output).unsqueeze(0)
-        print("214",output.size())
+        #print("214",output.size())
         output = F.relu(output)
         output, hidden = self.gru(output, hidden)
-        print("217",output.size())
+        #print("217",output.size())
         output = F.log_softmax(self.out(output[0]), dim=1)
-        print("219",output.size())
+        #print("219",output.size())
         return output, hidden, attn_weights
 
     def initHidden(self):
@@ -430,14 +430,15 @@ class ResNet(nn.Module):
         encoder_output = torch.zeros((64, 128), dtype=torch.float).cuda()
         for idx, frame in enumerate(x):
             
-            print("frame feature dim=", frame.size())
+            #print("frame feature dim=", frame.size())
             encoder_output[idx], hidden_state = self.gru4feature(frame.view(1,1,-1), hidden_state)
+            #print("encoder_output size=",encoder_output.size())
         #exit()
         #print("hidden state size = ",hidden_state.size())
         if TFDEM:
             return x, spatial_temporal_feature
         else:
-            return hidden_state
+            return encoder_output
 
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):

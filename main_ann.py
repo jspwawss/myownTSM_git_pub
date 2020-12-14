@@ -15,7 +15,7 @@ from opts import parser
 from ops import dataset_config
 from ops.utils import AverageMeter, AUC
 from ops.temporal_shift import make_temporal_pool
-from archs.Resnet_ann import AttnDecoderRNN
+from archs.Resnet_ann_v2 import AttnDecoderRNN
 
 from nltk.translate.bleu_score import sentence_bleu
 
@@ -254,10 +254,10 @@ def main():
 	'''
 	#global trainDataloader, valDataloader, train_loader, val_loader
 	trainDataloader = YouCookDataSetRcg(args.root_path, args.train_list,train=True,inputsize=crop_size,hasPreprocess = False,\
-			clipnums=args.clipnums,
+			#clipnums=args.clipnums,
 			hasWordIndex = True,)
 	valDataloader = YouCookDataSetRcg(args.root_path, args.val_list,val=True,inputsize=crop_size,hasPreprocess = False,\
-			clipnums=args.clipnums,
+			#clipnums=args.clipnums,
 			hasWordIndex = True,)
 
 	#print(trainDataloader._getMode())
@@ -421,8 +421,8 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 		#cap_nums = []
 
 		for clip in range(0,len(clips),max(len(clips)//50,1)):
-			print(type(input_video.size()))
-			print(input_video.size())
+			#print(type(input_video.size()))
+			#print(input_video.size())
 			if list(input_video.size()) != [0]:
 				if input_video.size()[1] > 50:
 					break
@@ -448,27 +448,27 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 
 		# compute output
 		wExtraLoss = 1 if args.prune == '' else 0.1
-		print("input video size=",input_video.size())
+		#print("input video size=",input_video.size())
 		encoder_output = model(input_video_var, input_caption_var) #size=(1, frames, 2048)
 		
-		print("encoder_output size=",encoder_output.size())
+		#print("encoder_output size=",encoder_output.size())
 		decoder_outputs = []
 		decoder_input = torch.tensor([[0]]).cuda() #SOS
 		decoder_hidden = decoder.initHidden()
 		use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 		#if False:
 		if use_teacher_forcing:
-
-			print("target size=,",target.size())
+			print("use_teacher_forceing")
+			#print("target size=,",target.size())
 		
-			print("target= ", target)
+			#print("target= ", target)
 			for tar in target[0]:
 				decoder_output, decoder_hidden , _ = decoder(decoder_input, decoder_hidden, encoder_output)
-				print("tar = ",tar)
-				print("tar size = ",tar.size())
+				#print("tar = ",tar)
+				#print("tar size = ",tar.size())
 				decoder_output_word = decoder_output.argmax().cpu()
 				decoder_outputs.append(decoder_output_word)
-				print("decoder_output_word=",decoder_output_word)
+				#print("decoder_output_word=",decoder_output_word)
 				#ttar = torch.zeros(17469, dtype=torch.long).unsqueeze(0).cuda()
 				#ttar[0,tar.data] = torch.tensor(1, dtype=torch.long).cuda()
 				#print("ttar size={}, decoder_output size={}".format(ttar.size(), decoder_output.size()))
@@ -488,9 +488,9 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 				decoder_input = topi.squeeze().detach()  # detach from history as input
 
 				loss += criterion(decoder_output, tar.unsqueeze(0))
-				print("-"*50)
-				print("decoder_input item=",decoder_input.item())
-				print(loss)
+				#print("-"*50)
+				#print("decoder_input item=",decoder_input.item())
+				#print(loss)
 				if decoder_input.item() == 1:
 					break
 		print("{0:*^50}".format("loss "+ str(loss)))
@@ -512,11 +512,11 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 		#loss = loss_main
 		#print("loss=",loss)
 		losses.update(loss.item(), )
-		print(decoder_outputs)
-		print(decoder_outputs[0].item())
+		#print(decoder_outputs)
+		#print(decoder_outputs[0].item())
 		decoder_sentence = [index2wordDict[index.item()] for index in decoder_outputs]
 		print(decoder_sentence)
-		print(target.size())
+		#print(target.size())
 		
 		target_sentence = [index2wordDict[index.item()] for index in target[0]]
 		
