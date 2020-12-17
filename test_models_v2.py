@@ -4,6 +4,8 @@ import argparse
 import time
 import os
 
+import torch.backends.cudnn as cudnn
+
 import torch.nn.parallel
 import torch.optim
 from sklearn.metrics import confusion_matrix
@@ -303,8 +305,8 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 	#print("*"*50)
 	#exit()
 	data_loader = torch.utils.data.DataLoader(
-			YouCookDataSetRcg(root_path, val_list,train=True,inputsize=input_size,hasPreprocess = False,\
-			clipnums=args.clipnums,
+			YouCookDataSetRcg(root_path, val_list,val=True,inputsize=input_size,hasPreprocess = False,\
+			#clipnums=args.clipnums,
 			hasWordIndex = True,)
 	)
 
@@ -320,6 +322,8 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 							#weight_decay=args.weight_decay,
 							)
 	net = torch.nn.DataParallel(net.cuda())
+	cudnn.benchmark = True
+
 	#net.eval()
 
 	data_gen = enumerate(data_loader)
@@ -350,7 +354,7 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 	
 	end = time.time()
 	with torch.no_grad():
-		with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+		with open(os.path.join(args.save_scores, "val.txt"), "a+") as txt:
 			txt.write("epoch\t"+str(epoch)+"\n")
 		for idx, data in enumerate(val_loader):
 			totalOutput = torch.tensor([],dtype=torch.float).cuda()
@@ -468,9 +472,10 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 						'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
 						'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
 						"output\target\t{output}\t{target}"		
-						'AUC {top5.val:.3f} ({top5.avg:.3f})'.format(
-				idx, len(val_loader), batch_time=batch_time, loss=losses,output=output, target=target,
-					top5=AUCs))	
+						'AUC {top5.val:.3f} ({top5.avg:.3f})\t'
+						"URL id = {URL} {id}".format(
+				idx, len(val_loader), batch_time=batch_time, loss=losses,output=totalOutput, target=totalTarget,
+					top5=AUCs, URL=URL, id= id))	
 			if idx % args.print_freq == 0:
 				#output = ('Test: [{0}/{1}]\t'
 				#		  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -485,13 +490,15 @@ def validate(val_loader, model, criterion, epoch, log=None, tf_writer=None):
 					log.flush()
 
 
-			with open(os.path.join(args.root_model, args.store_name, "val.txt"), "a+") as txt:
+			with open(os.path.join(args.save_scores, "val.txt"), "a+") as txt:
 				txt.write(txtoutput+"\n")
 
 			#break
 
 		txtoutput = ('Testing Results: auc {auc.avg:.3f}  Loss {loss.avg:.5f}'
 			  	.format(auc=AUCs, loss=losses))
+		with open(os.path.join(args.save_scores, "val.txt"), "a+") as txt:
+			txt.write(txtoutput+"\n")
 	print(txtoutput)
 	if log is not None:
 		log.write(txtoutput + '\n')
@@ -695,10 +702,10 @@ def train(train_loader, model, criterion, optimizer, epoch, log=None, tf_writer=
 
 criterion = torch.nn.BCELoss()
 best_prec1 = 0
-for epoch in range(int(args.epoch)):
+for epoch in range(12,int(args.epoch)+1):
 	print(this_weights.format(str(epoch+1)))
-	#checkpoint = torch.load(this_weights.format(str(epoch+1)))
-	#checkpoint = checkpoint['state_dict']
+	checkpoint = torch.load(this_weights.format(str(epoch+1)))
+	checkpoint = checkpoint['state_dict']
 	#for key, value in checkpoint.items():
 	#	print(key)
 	
@@ -732,8 +739,8 @@ for epoch in range(int(args.epoch)):
 	#	checkpoint[n] = checkpoint.pop(s)
 	
 	
-	#net.load_state_dict(checkpoint)
-	#net = net.cuda()
+	net.load_state_dict(checkpoint)
+	net = net.cuda()
 	print("{0:*^50}".format("checkpoint"))
 	##net.load_state_dict(base_dict)
 	#print("265")
@@ -747,9 +754,9 @@ for epoch in range(int(args.epoch)):
 	# evaluate on validation set
 	#model = model.load_state_dict(torch.load("/home/ubuntu/backup_kevin/myownTSM_git/checkpoint/TSM_youcook_RGB_resnet50_shift8_blockres_concatAll_conv1d_lr0.00025_dropout0.70_wd0.00050_batch16_segment8_e20_finetune_slice_v1_clipnum500/ckpt_"+str(epoch+1)+".pth.tar"))
 	
-	train(data_loader, net, criterion, optimizer, epoch)
+	#train(data_loader, net, criterion, optimizer, epoch)
 
-	#prec1 = validate(data_loader, net, criterion, epoch)
+	prec1 = validate(data_loader, net, criterion, epoch)
 
 	# remember best prec@1 and save checkpoint
 	######is_best = prec1 > best_prec1

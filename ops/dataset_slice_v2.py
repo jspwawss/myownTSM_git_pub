@@ -246,7 +246,7 @@ class YouCookDataSetRcg(data.Dataset):
     def _getAnnotation(self):#only include train(1333) and val(457) = 1790
         if self.clipnums == '':
             print("no clip nums")
-            exit()
+            #exit()
             with open(os.path.join(self.root_path,"annotations","youcookii_annotations_trainval.txt"),"r") as _anntxt:
                 text = _anntxt.read()
                 d = ast.literal_eval(text)

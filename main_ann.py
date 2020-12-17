@@ -475,7 +475,8 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 				#print(decoder_output)
 				#print(args.loss_type)
 				#print(criterion)
-				loss += criterion(decoder_output,tar.unsqueeze(0))
+				if index2wordDict[tar.item()] not in ["and", "or", "the", "just", "to", "with", "in", "a"]:
+					loss += criterion(decoder_output,tar.unsqueeze(0))
 				decoder_input = tar  # Teacher forcing
 		else:
 			print("without teacher forcing")
@@ -486,8 +487,8 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 				decoder_outputs.append(decoder_output_word)
 				topv, topi = decoder_output.topk(1)
 				decoder_input = topi.squeeze().detach()  # detach from history as input
-
-				loss += criterion(decoder_output, tar.unsqueeze(0))
+				if index2wordDict[tar.item()] not in ["and", "or", "the", "just", "to", "with", "in", "a"]:
+					loss += criterion(decoder_output, tar.unsqueeze(0))
 				#print("-"*50)
 				#print("decoder_input item=",decoder_input.item())
 				#print(loss)
@@ -521,7 +522,7 @@ def train(train_loader, model, decoder, criterion, optimizer, epoch, log, tf_wri
 		target_sentence = [index2wordDict[index.item()] for index in target[0]]
 		
 		print(target_sentence)
-		bleu = sentence_bleu(target_sentence, decoder_sentence ) #default weight is [0.25,0.25,0.25,0.25] = bleu-4
+		bleu = sentence_bleu([target_sentence], decoder_sentence ) #default weight is [0.25,0.25,0.25,0.25] = bleu-4
 		print("bleu =",bleu)
 
 		BLEUs.update(bleu)
