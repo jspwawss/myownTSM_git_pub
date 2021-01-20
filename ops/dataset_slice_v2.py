@@ -258,6 +258,15 @@ class YouCookDataSetRcg(data.Dataset):
                         self.llist.append([key,value["recipe_type"],value["annotations"],value["duration"]])
 
                 pass
+        elif self.clipnums == "0":
+            with open(os.path.join(self.root_path, "annotations", "test.txt"), "r") as _anntxt:
+                text = _anntxt.read()
+                d = ast.literal_eval(text)
+                self.database = d
+                for key, value in self.database.items():
+                    #print(value)
+                    if self.mode in value["subset"]:
+                        self.llist.append([key,value["recipe_type"],value["annotations"],value["duration"]])
         else:   
             with open(os.path.join(self.root_path,"annotations","annotation_"+self.clipnums+"_test1.txt"),"r") as _anntxt:
                 text = _anntxt.read()
@@ -451,8 +460,8 @@ class YouCookDataSetRcg(data.Dataset):
 
         #if len(captions) == 0:
         #    captions.append("") 
-        #print(capRes)
-        #print("capRes********")   
+        print(capRes)
+        print("capRes********")   
         if len(captions) == 1:
             if captions[0] == "":
                 capRes[0] = torch.tensor(EOS_token, dtype=torch.long,   )
@@ -504,7 +513,7 @@ class YouCookDataSetRcg(data.Dataset):
             #self.index = index
 
             item = self.llist[index]
-            #print(item)
+            print(item)
             URL = item[0]   #aFsdfsd464
             id = item[1]    #100~130,200~230,300~325,400...
             rst = []
@@ -529,7 +538,7 @@ class YouCookDataSetRcg(data.Dataset):
                 #    l = (int(item[3]))//self.resolution+1
                 #else:
                 #    l = 50
-                clip = [None] * (l+1)         #take one frame each 10 seconds
+                clip = [None] * (l+1)         
 
 
                 for dirpath, dianames, filenames in os.walk(os.path.join(self.root_path, "image_v2",str(id),URL)):
@@ -538,25 +547,26 @@ class YouCookDataSetRcg(data.Dataset):
                     
                     for filename in filenames:
                         idx = filename.split(".")[0].split("_")[-1]
-                        #print(idx)
+                        print(idx)
                         if (int(idx) % (item[3]//(l-1))) != 0:
                             continue
 
                         idx = int(idx) 
                   
                         video = self._getVideo(id=id,URL=URL,idx=idx)
-
+                        print("after vidoe")
                         if isinstance(video, bool) :
                             print("isinstance")
                             return False
 
                         captions, cap_num = self._getCaptions(id=id,URL=URL,idx=idx)
-
+                        print("after caption")
                         try:
                             clip[int(idx)] = [video, captions]
                             #clip[int(idx)//int(item[3]//(l-1))] = [video,captions]
                         except:
                             clip[-1] = [video, captions]
+                        
                     break
                     
                 #print("-"*50)
@@ -615,15 +625,16 @@ if __name__ == "__main__":
 
     #exit()
     crop_size = 224
-    dataset = YouCookDataSetRcg(val=True,inputsize=crop_size, hasWordIndex=True, hasPreprocess=False,clipnums=str(500))
-    dataset1 = YouCookDataSetRcg(train=True,inputsize=crop_size, hasWordIndex=False, hasPreprocess=False,clipnums=str(500))
+    #dataset = YouCookDataSetRcg(val=True,inputsize=crop_size, hasWordIndex=True, hasPreprocess=False,clipnums=str(500))
+    #dataset1 = YouCookDataSetRcg(train=True,inputsize=crop_size, hasWordIndex=False, hasPreprocess=False,clipnums=str(500))
+    dataset2 = YouCookDataSetRcg(test=True,inputsize=crop_size, hasWordIndex=False, hasPreprocess=False,clipnums=str(0))
     #print(dataset._getMode())
     #print(dataset1._getMode())
     rst = []
     #print(dataset == dataset1)
     #exit()
     train_loader = torch.utils.data.DataLoader(
-		dataset,
+		dataset2,
 		#shuffle=True,
 
 

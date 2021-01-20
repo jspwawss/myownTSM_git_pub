@@ -231,7 +231,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 	else:
 		new_length = 5
 	print("this weight\n",this_weights)
-	this_arch = this_weights.split('TSM_')[2].split('_')[2]
+	this_arch = this_weights.split('TSM_')[1].split('_')[2]
 	modality_list.append(modality)
 	num_class, args.train_list, val_list, root_path, prefix = dataset_config.return_dataset(args.dataset,modality)
 	
@@ -305,8 +305,9 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
 	#print("*"*50)
 	#exit()
 	data_loader = torch.utils.data.DataLoader(
-			YouCookDataSetRcg(root_path, val_list,val=True,inputsize=input_size,hasPreprocess = False,\
+			YouCookDataSetRcg(root_path, val_list,test=True,inputsize=input_size,hasPreprocess = False,\
 			#clipnums=args.clipnums,
+			clipnums = "0",\
 			hasWordIndex = True,)
 	)
 
@@ -702,7 +703,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log=None, tf_writer=
 
 criterion = torch.nn.BCELoss()
 best_prec1 = 0
-for epoch in range(12,int(args.epoch)+1):
+for epoch in range(20,int(args.epoch)+1):
 	print(this_weights.format(str(epoch+1)))
 	checkpoint = torch.load(this_weights.format(str(epoch+1)))
 	checkpoint = checkpoint['state_dict']
